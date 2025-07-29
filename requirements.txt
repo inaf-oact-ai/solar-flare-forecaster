@@ -1,0 +1,13 @@
+numpy
+pillow
+astropy
+scikit-image
+scikit-learn
+torch
+torchvision
+tqdm
+transformers
+accelerate
+evaluate
+matplotlib
+wandb
