@@ -48,6 +48,18 @@ import matplotlib.pyplot as plt
 ## LOGGER
 from sfforecaster import logger
 
+
+##########################
+##   MODEL UTILS
+##########################
+def extract_layer_id(name: str) -> int:
+	""" Extract layer id from vision encoder layer name """ 
+	match = re.search(r'\.layers\.(\d+)\.', name)
+	if not match:
+		logger.warning(f"No '.layers.<id>.' pattern found in: {name}")
+		return -1
+	return int(match.group(1))
+
 ##########################
 ##    DATA UTILS
 ##########################
