@@ -30,44 +30,29 @@ from sfforecaster.utils import *
 ######################################
 ###      CLASS LABEL SCHEMA
 ######################################
-def get_target_maps(skip_first_class=False):
-	""" """
-	
-	if skip_first_class:
-		id2target= {
-			0: -1, # NONE
-			1: 0,  # C FLARE
-			2: 1,  # M FLARE
-			3: 2,  # X FLARE
-		}
+def get_target_maps():
+	""" Return dictionary of id vs targets """
+
+	id2target= {
+		0: 0, # NONE
+		1: 1,  # C FLARE
+		2: 2,  # M FLARE
+		3: 3,  # X FLARE
+	}
 			
-		id2label= {
-			0: "C",
-			1: "M",
-			2: "X",
-		}
-		
-	else:
-		id2target= {
-			0: 0, # NONE
-			1: 1,  # C FLARE
-			2: 2,  # M FLARE
-			3: 3,  # X FLARE
-		}
-			
-		id2label= {
-			0: "NONE",
-			1: "C",
-			2: "M",
-			3: "X",
-		}
+	id2label= {
+		0: "NONE",
+		1: "C",
+		2: "M",
+		3: "X",
+	}
 		
 	# - Compute reverse dict
 	label2id= {v: k for k, v in id2label.items()}
 	
-	return id2label, label2id, id2target
-	
-	
+	return id2label, label2id, id2target	
+
+
 ######################################
 ###      DATASET BASE CLASS
 ######################################
@@ -226,21 +211,35 @@ class BaseVisDataset(Dataset):
 		
 		return class_id
 		
-	def load_targets(self, idx, id2target, mlb):
+	def load_hotenc_target(self, idx, id2target, mlb):
+		""" Load single-class/single-out target as hot-encoding """
+			
+		# - Get class ids
+		class_id= self.load_target(idx, id2target)
+		
+		# - Get class id (hot encoding)
+		class_ids_hotenc= mlb.fit_transform([[class_id]])
+		class_ids_hotenc = [j for sub in class_ids_hotenc for j in sub]
+		class_ids_hotenc= torch.from_numpy(np.array(class_ids_hotenc).astype(np.float32))
+		
+		return class_ids_hotenc
+		
+	def load_targets(self, idx, id2target):
+		""" Load single-class/single-out target """
+			
+		# - Get class ids
+		ids= self.datalist[idx]['ids']
+		class_ids= [id2target[id] for id in ids]
+		return class_ids
+		
+	def load_hotenc_targets(self, idx, id2target, mlb):
 		""" Load multi-class/multi-out targets """	
 		
 		# - Get class ids
-		ids= self.datalist[idx]['ids']
-		class_ids= []
-		for id in ids:
-			class_id= id2target[id]
-			if class_id!=-1:
-				class_ids.append(class_id)
-		
-		class_ids.sort()
+		class_ids= self.load_targets(idx, id2target)
 		
 		# - Get class id (hot encoding)
-		class_ids_hotenc= mlb.fit_transform([class_ids])
+		class_ids_hotenc= [mlb.fit_transform([[id]]) for id in class_ids]
 		class_ids_hotenc = [j for sub in class_ids_hotenc for j in sub]
 		class_ids_hotenc= torch.from_numpy(np.array(class_ids_hotenc).astype(np.float32))
 		
@@ -261,46 +260,6 @@ class BaseVisDataset(Dataset):
 ################################################
 ###   VIDEO-BASED FORECASTER
 ################################################		
-class VideoMultiOutDataset(BaseVisDataset):
-	""" Dataset to load solar HMI videos for multi-step forecasting """
-	
-	def __init__(self, 
-		filename, 
-		transform=None, 
-		load_as_gray=False,
-		apply_zscale=False,
-		zscale_contrast=0.25,
-		resize=False,
-		resize_size=224,
-		nclasses=None,
-		id2target=None,
-		verbose=False
-	):
-		super().__init__(
-			filename, 
-			transform,
-			load_as_gray,
-			apply_zscale, zscale_contrast,
-			resize, resize_size,
-			verbose
-		)
-		
-		self.nclasses= nclasses
-		self.id2target= id2target
-		self.mlb = MultiLabelBinarizer(classes=np.arange(0, self.nclasses))
-
-	def __getitem__(self, idx):
-		""" Iterator providing training data (pixel_values + labels) """
-		
-		# - Load image at index as tensor 
-		video_tensor= self.load_video(idx)
-		
-		# - Get class ids
-		class_ids_hotenc= self.load_targets(idx, self.id2target, self.mlb)
-		
-		return video_tensor, class_ids_hotenc
-		
-		
 class VideoDataset(BaseVisDataset):
 	""" Dataset to load solar HMI videos for single-step forecasting """
 	
@@ -312,47 +271,10 @@ class VideoDataset(BaseVisDataset):
 		zscale_contrast=0.25,
 		resize=False,
 		resize_size=224,
-		id2target=None,
-		verbose=False
-	):
-		super().__init__(
-			filename, 
-			transform,
-			load_as_gray,
-			apply_zscale, zscale_contrast,
-			resize, resize_size,
-			verbose
-		)
-		
-		self.id2target= id2target
-		
-	def __getitem__(self, idx):
-		""" Iterator providing training data (pixel_values + labels) """
-		
-		# - Load image at index as tensor 
-		video_tensor= self.load_video(idx)
-		
-		# - Get class ids
-		class_id= self.load_target(idx, self.id2target)
-		
-		return video_tensor, class_id
-		
-################################################
-###   IMAGE-BASED FORECASTER
-################################################	
-class ImgMultiOutDataset(BaseVisDataset):
-	""" Dataset to load solar HMI image for multi-step forecasting """
-	
-	def __init__(self, 
-		filename, 
-		transform=None, 
-		load_as_gray=False,
-		apply_zscale=False,
-		zscale_contrast=0.25,
-		resize=False,
-		resize_size=224,
 		nclasses=None,
 		id2target=None,
+		multiout=False,
+		multilabel=False,
 		verbose=False
 	):
 		super().__init__(
@@ -367,19 +289,33 @@ class ImgMultiOutDataset(BaseVisDataset):
 		self.nclasses= nclasses
 		self.id2target= id2target
 		self.mlb = MultiLabelBinarizer(classes=np.arange(0, self.nclasses))
-
+		self.multiout= multiout
+		self.multilabel= multilabel
+		
+		
 	def __getitem__(self, idx):
 		""" Iterator providing training data (pixel_values + labels) """
 		
 		# - Load image at index as tensor 
-		img_tensor= self.load_image(idx)
+		video_tensor= self.load_video(idx)
 		
 		# - Get class ids
-		class_ids_hotenc= self.load_targets(idx, self.id2target, self.mlb)
+		if self.multiout:
+			if self.multilabel:
+				class_id= self.load_hotenc_targets(idx, self.id2target, self.mlb)
+			else:
+				class_id= self.load_targets(idx, self.id2target)
+		else:
+			if self.multilabel:
+				class_id= self.load_hotenc_target(idx, self.id2target, self.mlb)
+			else:
+				class_id= self.load_target(idx, self.id2target)
 		
-		return img_tensor, class_ids_hotenc
-	
+		return video_tensor, class_id
 		
+################################################
+###   IMAGE-BASED FORECASTER
+################################################	
 class ImgDataset(BaseVisDataset):
 	""" Dataset to load solar HMI images for single-step forecasting """
 	
@@ -391,7 +327,10 @@ class ImgDataset(BaseVisDataset):
 		zscale_contrast=0.25,
 		resize=False,
 		resize_size=224,
+		nclasses=None,
 		id2target=None,
+		multiout=False,
+		multilabel=False,
 		verbose=False
 	):
 		super().__init__(
@@ -403,7 +342,11 @@ class ImgDataset(BaseVisDataset):
 			verbose
 		)
 		
+		self.nclasses= nclasses
 		self.id2target= id2target
+		self.mlb = MultiLabelBinarizer(classes=np.arange(0, self.nclasses))
+		self.multiout= multiout
+		self.multilabel= multilabel
 		
 	def __getitem__(self, idx):
 		""" Iterator providing training data (pixel_values + labels) """
@@ -412,7 +355,16 @@ class ImgDataset(BaseVisDataset):
 		img_tensor= self.load_image(idx)
 		
 		# - Get class ids
-		class_id= self.load_target(idx, self.id2target)
+		if self.multiout:
+			if self.multilabel:
+				class_id= self.load_hotenc_targets(idx, self.id2target, self.mlb)
+			else:
+				class_id= self.load_targets(idx, self.id2target)
+		else:
+			if self.multilabel:
+				class_id= self.load_hotenc_target(idx, self.id2target, self.mlb)
+			else:
+				class_id= self.load_target(idx, self.id2target)
 		
 		return img_tensor, class_id
 		
@@ -420,45 +372,6 @@ class ImgDataset(BaseVisDataset):
 ################################################
 ###   IMAGE STACK-BASED FORECASTER
 ################################################		
-class ImgStackMultiOutDataset(BaseVisDataset):
-	""" Dataset to load solar multi-channel images for multi-step forecasting """
-	
-	def __init__(self, 
-		filename, 
-		transform=None, 
-		apply_zscale=False,
-		zscale_contrast=0.25,
-		resize=False,
-		resize_size=224,
-		nclasses=None,
-		id2target=None,
-		verbose=False
-	):
-		super().__init__(
-			filename=filename, 
-			transform=transform,
-			load_as_gray=True, # load each image as [1,H,W]
-			apply_zscale=apply_zscale, zscale_contrast=zscale_contrast,
-			resize=resize, resize_size=resize_size,
-			verbose=verbose
-		)
-		
-		self.nclasses= nclasses
-		self.id2target= id2target
-		self.mlb = MultiLabelBinarizer(classes=np.arange(0, self.nclasses))
-
-	def __getitem__(self, idx):
-		""" Iterator providing training data (pixel_values + labels) """
-		
-		# - Load image at index as tensor 
-		imgstack_tensor= self.load_image_stack(idx)
-		
-		# - Get class ids
-		class_ids_hotenc= self.load_targets(idx, self.id2target, self.mlb)
-		
-		return imgstack_tensor, class_ids_hotenc
-		
-		
 class ImgStackDataset(BaseVisDataset):
 	""" Dataset to load solar multi-channel images for single-step forecasting """
 	
@@ -469,7 +382,10 @@ class ImgStackDataset(BaseVisDataset):
 		zscale_contrast=0.25,
 		resize=False,
 		resize_size=224,
+		nclasses=None,
 		id2target=None,
+		multiout=False,
+		multilabel=False,
 		verbose=False
 	):
 		super().__init__(
@@ -480,7 +396,11 @@ class ImgStackDataset(BaseVisDataset):
 			resize=resize, resize_size=resize_size,
 			verbose=verbose
 		)
+		self.nclasses= nclasses
 		self.id2target= id2target
+		self.mlb = MultiLabelBinarizer(classes=np.arange(0, self.nclasses))
+		self.multiout= multiout
+		self.multilabel= multilabel
 		
 	def __getitem__(self, idx):
 		""" Iterator providing training data (pixel_values + labels) """
@@ -489,7 +409,16 @@ class ImgStackDataset(BaseVisDataset):
 		imgstack_tensor= self.load_image_stack(idx)
 		
 		# - Get class ids
-		class_id= self.load_target(idx, self.id2target)
+		if self.multiout:
+			if self.multilabel:
+				class_id= self.load_hotenc_targets(idx, self.id2target, self.mlb)
+			else:
+				class_id= self.load_targets(idx, self.id2target)
+		else:
+			if self.multilabel:
+				class_id= self.load_hotenc_target(idx, self.id2target, self.mlb)
+			else:
+				class_id= self.load_target(idx, self.id2target)
 		
 		return imgstack_tensor, class_id
 		
