@@ -466,8 +466,8 @@ def load_training_opts(args):
 		gradient_accumulation_steps=args.gradient_accumulation_steps,
 		dataloader_drop_last= args.drop_last,
 		eval_strategy=eval_strategy,
-		eval_on_start=run_eval_on_start,
-		eval_steps=logging_steps,
+		eval_on_start=args.run_eval_on_start,
+		eval_steps=args.logging_steps,
 		##batch_eval_metrics=False,
 		##label_names=label_names,# DO NOT USE (see https://discuss.huggingface.co/t/why-do-i-get-no-validation-loss-and-why-are-metrics-not-calculated/32373)
 		save_strategy="epoch" if args.save_model_every_epoch else "no",
