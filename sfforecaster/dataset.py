@@ -311,7 +311,9 @@ class VideoDataset(BaseVisDataset):
 			else:
 				class_id= self.load_target(idx, self.id2target)
 		
-		return video_tensor, class_id
+		class_id_tensor= torch.tensor(class_id, dtype=torch.long)
+		
+		return video_tensor, class_id_tensor
 		
 ################################################
 ###   IMAGE-BASED FORECASTER
@@ -366,7 +368,9 @@ class ImgDataset(BaseVisDataset):
 			else:
 				class_id= self.load_target(idx, self.id2target)
 		
-		return img_tensor, class_id
+		class_id_tensor= torch.tensor(class_id, dtype=torch.long)
+		
+		return img_tensor, class_id_tensor
 		
 		
 ################################################
@@ -420,5 +424,7 @@ class ImgStackDataset(BaseVisDataset):
 			else:
 				class_id= self.load_target(idx, self.id2target)
 		
-		return imgstack_tensor, class_id
+		class_id_tensor= torch.tensor(class_id, dtype=torch.long)
+		
+		return imgstack_tensor, class_id_tensor
 		
