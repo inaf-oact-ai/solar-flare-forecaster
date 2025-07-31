@@ -94,7 +94,7 @@ class BaseVisDataset(Dataset):
 			return None	
 		
 		# - Load image as PyTorch tensor
-		img= load_tensor(image_path)
+		img= self.load_tensor(image_path)
 		
 		# - Check for None
 		if img is None:
