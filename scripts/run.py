@@ -27,6 +27,7 @@ import torchvision.transforms as T
 
 # - TRANSFORMERS
 import transformers
+from transformers import Trainer
 from transformers import pipeline
 from transformers import AutoProcessor, AutoModel
 from transformers import AutoImageProcessor, AutoModelForImageClassification
