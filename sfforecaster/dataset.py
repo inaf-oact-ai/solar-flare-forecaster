@@ -86,7 +86,7 @@ class BaseVisDataset(Dataset):
 		item= self.datalist[idx]
 		image_path= ""
 		if "filepath" in item:
-			image_path= item["filepaths"]
+			image_path= item["filepath"]
 		elif "filepaths" in item:
 			image_path= item["filepaths"][0]
 		else:
