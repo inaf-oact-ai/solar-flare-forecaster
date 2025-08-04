@@ -557,7 +557,7 @@ def run_predict(
  
  		# - Compute model outputs
 		with torch.no_grad():
-			outputs = model(image_tensor)
+			outputs = model(input_tensor)
 			logits = outputs.logits
 				
   	# - Compute predicted labels & probs
