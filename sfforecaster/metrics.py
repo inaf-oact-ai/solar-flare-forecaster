@@ -138,13 +138,23 @@ def build_multi_label_metrics(target_names):
 		preds = p.predictions[0] if isinstance(p.predictions, tuple) else p.predictions
 		nonlocal target_names
 		
-		result = multi_label_metrics(
+		# - Compute all metrics
+		metrics = multi_label_metrics(
 			predictions=preds, 
 			labels=p.label_ids,
 			target_names=target_names
 		)
-	
-		return result
+		
+		# - Trainer wants only the scalar metrics
+		metrics_scalar= {
+			"accuracy": metrics["accuracy"],
+			"precision": metrics["precision"],
+			"recall": metrics["recall"],
+			"f1score": metrics["f1score"],
+			"f1score_micro": metrics["f1score_micro"]
+		}
+		
+		return metrics_scalar
 		
 	return compute_multi_label_metrics
 
@@ -159,30 +169,45 @@ def single_label_metrics(predictions, labels, target_names=None):
 	probs= softmax(torch.Tensor(predictions))
 	
 	# - Next, use threshold to turn them into integer predictions
-	y_pred= np.argmax(probs, axis=1)
+	#y_pred= np.argmax(probs, axis=1)
+	y_pred = torch.argmax(probs, dim=1).numpy()
 	  
 	# - Finally, compute metrics
-	y_true = np.where(labels==1)[1]
+	#   Ensure labels are NumPy array
+	#y_true = np.where(labels==1)[1]
+	#y_true = labels # already class indices
+	y_true = labels if isinstance(labels, np.ndarray) else labels.detach().cpu().numpy()
+
+	# If target names are provided, infer number of classes from them
+	if target_names is not None:
+		num_classes = len(target_names)
+		label_indices = list(range(num_classes))
+		all_class_indices = list(range(len(target_names)))
+	else:
+		# Fallback: infer from y_true and y_pred
+		label_indices = sorted(set(y_true).union(set(y_pred)))
+    all_class_indices = sorted(set(y_true).union(set(y_pred)))   
+        
+	class_report= classification_report(
+		y_true, 
+		y_pred, 
+		labels=label_indices,
+		target_names=target_names if target_names else None,
+		output_dict=True
+	)
 	
-	class_report= classification_report(y_true, y_pred, target_names=target_names, output_dict=True)
-	#class_report_str= classification_report(y_true, y_pred, target_names=target_names, output_dict=False)
-	
-	#accuracy = accuracy_score(y_true, y_pred)
 	accuracy = accuracy_score(y_true, y_pred, normalize=True) # NB: This computes subset accuracy (the set of labels predicted for a sample must exactly match the corresponding set of labels in y_true)
 	
-	precision= precision_score(y_true=y_true, y_pred=y_pred, average='weighted')
-	#precision= report['weighted avg']['precision']
+	precision= precision_score(y_true=y_true, y_pred=y_pred, average='weighted', labels=all_class_indices, zero_division=0)
 	
-	recall= recall_score(y_true=y_true, y_pred=y_pred, average='weighted')
-	#recall= report['weighted avg']['recall']
+	recall= recall_score(y_true=y_true, y_pred=y_pred, average='weighted', labels=all_class_indices, zero_division=0)
 	
-	f1score= f1_score(y_true=y_true, y_pred=y_pred, average='weighted')
-	#f1score= report['weighted avg']['f1-score']
+	f1score= f1_score(y_true=y_true, y_pred=y_pred, average='weighted', labels=all_class_indices, zero_division=0)
 	
-	f1score_micro = f1_score(y_true=y_true, y_pred=y_pred, average='micro')
+	f1score_micro = f1_score(y_true=y_true, y_pred=y_pred, average='micro', labels=all_class_indices, zero_division=0)
 	
-	cm= confusion_matrix(y_true, y_pred)
-	cm_norm= confusion_matrix(y_true, y_pred, normalize="true")
+	cm= confusion_matrix(y_true, y_pred, labels=all_class_indices)
+	cm_norm= confusion_matrix(y_true, y_pred, labels=all_class_indices, normalize="true")
 
 	print("confusion matrix")
 	print(cm)
@@ -210,7 +235,7 @@ def single_label_metrics(predictions, labels, target_names=None):
 		'confusion_matrix_norm': cm_norm.tolist(), # to make it serialized in json save
 	}
 	
-	print("metrics")
+	print("--> metrics")
 	print(metrics)
 	  
 	return metrics
@@ -222,13 +247,23 @@ def build_single_label_metrics(target_names):
 		preds = p.predictions[0] if isinstance(p.predictions, tuple) else p.predictions
 		nonlocal target_names
 		
-		result = single_label_metrics(
+		# - Compute all metrics
+		metrics = single_label_metrics(
 			predictions=preds, 
 			labels=p.label_ids,
 			target_names=target_names
 		)
-	
-		return result
+		
+		# - Trainer wants only the scalar metrics
+		metrics_scalar= {
+			"accuracy": metrics["accuracy"],
+			"precision": metrics["precision"],
+			"recall": metrics["recall"],
+			"f1score": metrics["f1score"],
+			"f1score_micro": metrics["f1score_micro"]
+		}
+		
+		return metrics_scalar
 		
 	return compute_single_label_metrics
 
