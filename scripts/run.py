@@ -597,7 +597,7 @@ def run_predict(
 			image_info["label_pred"]= str(predicted_label)
 			image_info["prob_pred"]= float(predicted_prob)
 					
-			if verbose:
+			if args.verbose:
 				print("== Image: %s ==" % (sname))
 				print("logits.squeeze().cpu()")
 				print(logits.squeeze().cpu())
