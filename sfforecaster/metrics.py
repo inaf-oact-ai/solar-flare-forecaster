@@ -182,11 +182,9 @@ def single_label_metrics(predictions, labels, target_names=None):
 	if target_names is not None:
 		num_classes = len(target_names)
 		label_indices = list(range(num_classes))
-		all_class_indices = list(range(len(target_names)))
 	else:
 		# Fallback: infer from y_true and y_pred
 		label_indices = sorted(set(y_true).union(set(y_pred)))
-    all_class_indices = sorted(set(y_true).union(set(y_pred)))   
         
 	class_report= classification_report(
 		y_true, 
@@ -198,16 +196,16 @@ def single_label_metrics(predictions, labels, target_names=None):
 	
 	accuracy = accuracy_score(y_true, y_pred, normalize=True) # NB: This computes subset accuracy (the set of labels predicted for a sample must exactly match the corresponding set of labels in y_true)
 	
-	precision= precision_score(y_true=y_true, y_pred=y_pred, average='weighted', labels=all_class_indices, zero_division=0)
+	precision= precision_score(y_true=y_true, y_pred=y_pred, average='weighted', labels=label_indices, zero_division=0)
 	
-	recall= recall_score(y_true=y_true, y_pred=y_pred, average='weighted', labels=all_class_indices, zero_division=0)
+	recall= recall_score(y_true=y_true, y_pred=y_pred, average='weighted', labels=label_indices, zero_division=0)
 	
-	f1score= f1_score(y_true=y_true, y_pred=y_pred, average='weighted', labels=all_class_indices, zero_division=0)
+	f1score= f1_score(y_true=y_true, y_pred=y_pred, average='weighted', labels=label_indices, zero_division=0)
 	
-	f1score_micro = f1_score(y_true=y_true, y_pred=y_pred, average='micro', labels=all_class_indices, zero_division=0)
+	f1score_micro = f1_score(y_true=y_true, y_pred=y_pred, average='micro', labels=label_indices, zero_division=0)
 	
-	cm= confusion_matrix(y_true, y_pred, labels=all_class_indices)
-	cm_norm= confusion_matrix(y_true, y_pred, labels=all_class_indices, normalize="true")
+	cm= confusion_matrix(y_true, y_pred, labels=label_indices)
+	cm_norm= confusion_matrix(y_true, y_pred, labels=label_indices, normalize="true")
 
 	print("confusion matrix")
 	print(cm)
