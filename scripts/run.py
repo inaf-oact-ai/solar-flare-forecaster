@@ -136,6 +136,7 @@ def get_args():
 	parser.set_defaults(drop_last=False)
 	
 	# - Imbalanced trainer options
+	parser.add_argument("--use_custom_trainer", dest='use_custom_trainer', action="store_true", default=False, help="Use custom trainer (for imbalance).")
 	parser.add_argument("--use_weighted_loss", dest='use_weighted_loss', action="store_true", default=False, help="Use class-weighted loss (CE or focal alpha).")
 	parser.add_argument("--use_weighted_sampler", dest='use_weighted_sampler', action="store_true", default=False, help="Use a WeightedRandomSampler for training.")
 	parser.add_argument("--loss_type", dest='loss_type', type=str, choices=["ce", "focal"], default="ce", help="Loss type: standard cross-entropy or focal loss.")
@@ -797,7 +798,7 @@ def main():
 	focal_alpha = class_weights if args.loss_type == "focal" else None		
 		
 	# - Set trainer
-	if args.class_weighted_trainer:
+	if args.use_custom_trainer:
 		logger.info("Using custom class-weighted loss trainer ...")
 		trainer = AdvancedImbalanceTrainer(
 			model=model,
