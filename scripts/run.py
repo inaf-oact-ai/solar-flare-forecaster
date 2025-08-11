@@ -780,9 +780,9 @@ def main():
 	class_weights= None
 	if args.use_weighted_loss:
 		logger.info("Computing class weights from dataset ...")
-		class_weights = compute_class_weights_from_dataset(
-			train_ds=dataset, 
+		class_weights = dataset.compute_class_weights(
 			num_classes=num_labels, 
+			id2target=id2target,
 			scheme="balanced"
 		)
 		print("--> CLASS WEIGHTS")
@@ -792,9 +792,9 @@ def main():
 	sample_weights = None
 	if args.use_weighted_sampler:
 		logger.info("Computing sample weights from dataset ...")
-		sample_weights = compute_sample_weights_from_dataset(
-			train_ds=dataset,
+		sample_weights = dataset.compute_sample_weights(
 			num_classes=num_labels,
+			id2target=id2target,
 			scheme="balanced"
 		)
 		
