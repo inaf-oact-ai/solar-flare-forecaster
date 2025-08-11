@@ -283,11 +283,11 @@ def single_label_metrics(predictions, labels, target_names=None):
 	MCC_coeff= matthews_corrcoef(y_true=y_true, y_pred=y_pred)
 			
 	# - Compute summary metrics
-	hss_summary = summarize_per_class(HSS, support)
-	tss_summary = summarize_per_class(TSS, support)
-	gss_summary = summarize_per_class(GSS, support)
-	tpr_summary = summarize_per_class(TPR, support)	
-	tnr_summary = summarize_per_class(TNR, support)	
+	hss_summary = summarize_metrics_per_class(HSS, support)
+	tss_summary = summarize_metrics_per_class(TSS, support)
+	gss_summary = summarize_metrics_per_class(GSS, support)
+	tpr_summary = summarize_metrics_per_class(TPR, support)	
+	tnr_summary = summarize_metrics_per_class(TNR, support)	
 			
 	print(f"FP={FP}, FN={FN}, TP={TP}, TN={TN}, ACC={ACC}, accuracy={accuracy}, TSS={TSS}, HSS={HSS}, GSS={GSS}, MCC={MCC}, MCC_coeff={MCC_coeff}")
 	print(f"HSS: {hss_summary}")
