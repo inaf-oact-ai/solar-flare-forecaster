@@ -779,13 +779,19 @@ def main():
 	num_labels = model.config.num_labels
 	class_weights= None
 	if args.use_weighted_loss:
-		class_weights = compute_class_weights_from_dataset(dataset, num_labels, scheme="balanced")
+		logger.info("Computing class weights from dataset ...")
+		class_weights = compute_class_weights_from_dataset(
+			train_ds=dataset, 
+			num_classes=num_labels, 
+			scheme="balanced"
+		)
 		print("--> CLASS WEIGHTS")
 		print(class_weights)
 	
 	# - Compute weights for data sampler
 	sample_weights = None
 	if args.use_weighted_sampler:
+		logger.info("Computing sample weights from dataset ...")
 		sample_weights = compute_sample_weights_from_dataset(
 			train_ds=dataset,
 			num_classes=num_labels,
