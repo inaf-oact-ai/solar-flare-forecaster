@@ -18,6 +18,7 @@ from sklearn.metrics import accuracy_score, hamming_loss
 from sklearn.metrics import classification_report
 from sklearn.metrics import confusion_matrix, multilabel_confusion_matrix
 from sklearn.metrics import hamming_loss
+from sklearn.metrics import matthews_corrcoef
 
 # - TORCH
 import torch
@@ -219,6 +220,56 @@ def single_label_metrics(predictions, labels, target_names=None):
 	else:
 		nclasses= y_true.shape[-1]
 		class_names= [str(item) for item in list(np.arange(0,nclasses))]
+	
+	# - Compute true/false positive/negative
+	FP = cm.sum(axis=0) - np.diag(cm)  
+	FN = cm.sum(axis=1) - np.diag(cm)
+	TP = np.diag(cm)
+	TN = cm.sum() - (FP + FN + TP)
+	
+	eps= 1.e-7
+	
+	# - Sensitivity, hit rate, recall, or true positive rate
+	TPR = TP/(TP + FN + eps)
+	
+	# - Specificity or true negative rate
+	TNR = TN/(TN + FP + eps) 
+	
+	# - Precision or positive predictive value
+	PPV = TP/(TP+FP)
+
+	# - Negative predictive value
+	NPV = TN/(TN+FN)
+
+	# - Fall out or false positive rate
+	FPR = FP/(FP+TN)
+
+	# - False negative rate
+	FNR = FN/(TP+FN)
+
+	# - False discovery rate
+	FDR = FP/(TP+FP)
+	
+	# - Overall accuracy
+	ACC = (TP+TN)/(TP+FP+FN+TN)
+	
+	# - Compute True Skill Statistic (TSS)
+	#TSS= ((TP*TN)-(FP*FN))/((TP+FN)*(FP+TN))
+	TSS= TPR + TNR - 1
+			
+	# - Compute Heidke Skill Score (HSS)
+	#HSS= 2*((TP*TN)-(FP*FN))/( ((TP+FN)*(TN+FN)) + ((FP+TN)*(FP+TP)) )
+	HSS= 2*(TP*TN-FP*FN)/((TP+FN)*(TN+FN)+(TP+FP)*(FP+TN))
+           
+	# - Compute Gilbert Skill Score (GSS)
+	GSS= (TP- ( ((TP+FN)*(TP+FP))/(TP+FP+TN+FN) ) )/( (TP+FP+FN) - ( ((TP+FN)*(TP+FP))/(TP+FP+TN+FN) ) )
+	
+	# - Compute Matthew’s correlation coefficient (MCC) (CHECK!!!)
+	#MCC= ((TP*TN)-(FP*FN))/np.sqrt( (TP+FP)*(TP+FN)*(TP+FP)*(TN+FN) ) # WRONG in https://arxiv.org/pdf/2408.05590v1 ?
+	MCC= ((TP*TN)-(FP*FN))/np.sqrt( (TP+FP)*(TP+FN)*(TN+FP)*(TN+FN) )
+	MCC_coeff= matthews_corrcoef(y_true=y_true, y_pred=y_pred)
+			
+	print(f"FP={FP}, FN={FN}, TP={TP}, TN={TN}, ACC={ACC}, accuracy={accuracy}, TSS={TSS}, HSS={HSS}, GSS={GSS}, MCC={MCC}, MCC_coeff={MCC_coeff}")
 			
 	# - Return as dictionary
 	metrics = {
@@ -231,6 +282,21 @@ def single_label_metrics(predictions, labels, target_names=None):
 		'class_report': class_report,
 		'confusion_matrix': cm.tolist(),# to make it serialized in json save
 		'confusion_matrix_norm': cm_norm.tolist(), # to make it serialized in json save
+		'fp': FP,
+		'fn': FN,
+		'tp': TP,
+		'tn': TN,
+		'tpr': TPR,
+		'tnr': TNR,
+		'ppv': PPV,
+		'npv': NPV,
+		'fpr': FPR,
+		'fnr': FNR,
+		'fdr': FDR,
+		'tss': TSS,
+		'hss': HSS,
+		'gss': GSS,
+		'mcc': MCC_coeff
 	}
 	
 	print("--> metrics")
@@ -258,7 +324,22 @@ def build_single_label_metrics(target_names):
 			"precision": metrics["precision"],
 			"recall": metrics["recall"],
 			"f1score": metrics["f1score"],
-			"f1score_micro": metrics["f1score_micro"]
+			"f1score_micro": metrics["f1score_micro"],
+			"fp": metrics["fp"],
+			"fn": metrics["fn"],
+			"tp": metrics["tp"],
+			"tn": metrics["tn"],
+			"tpr": metrics["tpr"],
+			"tnr": metrics["tnr"],
+			"ppv": metrics["ppv"],
+			"npv": metrics["npv"],
+			"fpr": metrics["fpr"],
+			"fnr": metrics["fnr"],
+			"fdr": metrics["fdr"],
+			"tss": metrics["tss"],
+			"hss": metrics["hss"],
+			"gss": metrics["gss"],
+			"mcc": metrics["mcc"]
 		}
 		
 		return metrics_scalar
