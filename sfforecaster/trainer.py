@@ -156,7 +156,7 @@ class AdvancedImbalanceTrainer(Trainer):
 				w = self.class_weights.to(self.model.device) if self.class_weights is not None else None
 				self.loss_fct = torch.nn.CrossEntropyLoss(weight=w)
 
-	def compute_loss(self, model, inputs, return_outputs=False):
+	def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
 		""" Override trainer compute_loss function """
 		
 		pixel_values = inputs.get("pixel_values")
