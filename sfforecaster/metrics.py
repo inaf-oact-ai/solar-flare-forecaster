@@ -58,6 +58,16 @@ def hamming_score_v2(y_true, y_pred, normalize=True, sample_weight=None):
 		acc_list.append(tmp_a)
 		   
 	return np.nanmean(acc_list)
+	
+def summarize_metrics_per_class(scores, support):
+	"""
+		scores: per-class array (e.g., HSS per class)
+		support: number of true samples per class (cm.sum(axis=1))
+	"""
+	eps = 1e-7
+	macro = np.nanmean(scores)
+	weighted = np.nansum(scores * (support / (support.sum() + eps)))
+	return {"macro": macro, "weighted": weighted, "per_class": scores}
 
 ###########################################
 ##   MULTI-LABEL CLASS METRICS
@@ -222,6 +232,7 @@ def single_label_metrics(predictions, labels, target_names=None):
 		class_names= [str(item) for item in list(np.arange(0,nclasses))]
 	
 	# - Compute true/false positive/negative
+	support = cm.sum(axis=1)
 	FP = cm.sum(axis=0) - np.diag(cm)  
 	FN = cm.sum(axis=1) - np.diag(cm)
 	TP = np.diag(cm)
@@ -269,8 +280,16 @@ def single_label_metrics(predictions, labels, target_names=None):
 	MCC= ((TP*TN)-(FP*FN))/np.sqrt( (TP+FP)*(TP+FN)*(TN+FP)*(TN+FN) )
 	MCC_coeff= matthews_corrcoef(y_true=y_true, y_pred=y_pred)
 			
-	print(f"FP={FP}, FN={FN}, TP={TP}, TN={TN}, ACC={ACC}, accuracy={accuracy}, TSS={TSS}, HSS={HSS}, GSS={GSS}, MCC={MCC}, MCC_coeff={MCC_coeff}")
+	# - Compute summary metrics
+	hss_summary = summarize_per_class(HSS, support)
+	tss_summary = summarize_per_class(TSS, support)
+	gss_summary = summarize_per_class(GSS, support)		
 			
+	print(f"FP={FP}, FN={FN}, TP={TP}, TN={TN}, ACC={ACC}, accuracy={accuracy}, TSS={TSS}, HSS={HSS}, GSS={GSS}, MCC={MCC}, MCC_coeff={MCC_coeff}")
+	print(f"HSS: {hss_summary}")
+	print(f"TSS: {tss_summary}")
+	print(f"GSS: {gss_summary}")
+	
 	# - Return as dictionary
 	metrics = {
 		'class_names': class_names,
@@ -296,7 +315,10 @@ def single_label_metrics(predictions, labels, target_names=None):
 		'tss': TSS,
 		'hss': HSS,
 		'gss': GSS,
-		'mcc': MCC_coeff
+		'mcc': MCC_coeff,
+		'hss_summary': hss_summary,
+		'tss_summary': tss_summary,
+		'gss_summary': gss_summary,
 	}
 	
 	print("--> metrics")
@@ -339,7 +361,13 @@ def build_single_label_metrics(target_names):
 			#"tss": metrics["tss"],
 			#"hss": metrics["hss"],
 			#"gss": metrics["gss"],
-			#"mcc": metrics["mcc"]
+			"mcc": metrics["mcc"],
+			"hss_macro": metrics["hss_summary"]["macro"],
+			"tss_macro": metrics["tss_summary"]["macro"],
+			"gss_macro": metrics["gss_summary"]["macro"],
+			"hss_weighted": metrics["hss_summary"]["weighted"],
+			"tss_weighted": metrics["tss_summary"]["weighted"],
+			"gss_weighted": metrics["gss_summary"]["weighted"],
 		}
 		
 		return metrics_scalar
