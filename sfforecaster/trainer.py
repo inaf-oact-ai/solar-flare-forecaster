@@ -1,0 +1,123 @@
+#!/usr/bin/env python
+
+from __future__ import print_function
+
+##################################################
+###          MODULE IMPORT
+##################################################
+# - STANDARD MODULES
+import sys
+import os
+import random
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple, Union
+
+# - TORCH
+import torch
+from torch import nn
+from torch.utils.data import Dataset, IterableDataset
+import torchvision.transforms.functional as TF
+import torchvision.transforms as T
+
+# - TRANSFORMERS
+import transformers
+from transformers import pipeline
+from transformers import AutoProcessor, AutoModel
+from transformers import AutoImageProcessor, AutoModelForImageClassification
+from transformers.configuration_utils import PretrainedConfig
+from transformers.modeling_utils import PreTrainedModel
+from transformers.data.data_collator import DataCollator
+from transformers.training_args import TrainingArguments
+from transformers.tokenization_utils_base import PreTrainedTokenizerBase
+from transformers.trainer_utils import EvalPrediction
+from transformers.trainer_callback import TrainerCallback
+from transformers import EvalPrediction    
+import evaluate
+
+# - SCLASSIFIER-VIT
+from sfforecaster.utils import *
+from sfforecaster import logger
+
+##########################################
+##    WEIGHTED-LOSS CUSTOM TRAINER
+##########################################
+class AdvancedImbalanceTrainer(Trainer):
+	""" Custom trainer implementing a weighted loss and dataset weighted resampling to tackle class imbalance """
+    
+	def __init__(
+		self,
+		*args,
+		class_weights=None,          # torch.tensor [C] or None
+		multilabel=False,
+		loss_type="ce",              # "ce" or "focal"
+		focal_gamma=2.0,
+		focal_alpha=None,            # None | float | tensor[C] (multiclass)
+		sample_weights=None,         # list[float] per-example for train set or None
+		**kwargs
+	):
+		super().__init__(*args, **kwargs)
+		self.class_weights = class_weights
+		self.multilabel = multilabel
+		self.loss_type = loss_type
+		self.focal_gamma = focal_gamma
+		self.focal_alpha = focal_alpha
+		self.sample_weights = sample_weights
+
+		# - Build the criterion
+		if self.multilabel:
+			if self.loss_type == "focal":
+				pos_w = self.class_weights.to(self.model.device) if self.class_weights is not None else None
+				self.loss_fct = FocalLossMultiLabel(gamma=self.focal_gamma, pos_weight=pos_w, reduction="mean")
+			else:
+				pos_w = self.class_weights.to(self.model.device) if self.class_weights is not None else None
+				self.loss_fct = nn.BCEWithLogitsLoss(pos_weight=pos_w)
+		else:
+			if self.loss_type == "focal":
+				alpha = self.focal_alpha
+				if isinstance(alpha, torch.Tensor):
+					alpha = alpha.to(self.model.device)
+				self.loss_fct = FocalLossMultiClass(alpha=alpha, gamma=self.focal_gamma, reduction="mean")
+			else:
+				w = self.class_weights.to(self.model.device) if self.class_weights is not None else None
+				self.loss_fct = nn.CrossEntropyLoss(weight=w)
+
+	def compute_loss(self, model, inputs, return_outputs=False):
+		""" Override trainer compute_loss function """
+		
+		pixel_values = inputs.get("pixel_values")
+		labels = inputs.get("labels")
+		outputs = model(pixel_values)
+		#labels = inputs.pop("labels")
+		#outputs = model(**inputs)
+		logits = outputs.logits
+
+		if self.multilabel:
+			labels = labels.float()
+			loss = self.loss_fct(logits, labels)
+		else:
+			loss = self.loss_fct(logits, labels)
+
+		return (loss, outputs) if return_outputs else loss
+
+	def get_train_dataloader(self):
+		""" Get train dataloader with resampling """
+		
+		if self.sample_weights is None:
+			return super().get_train_dataloader()
+
+		# - Weighted sampler (per-example) — replacement=True is standard here
+		sampler = WeightedRandomSampler(
+			weights=self.sample_weights,
+			num_samples=len(self.sample_weights),
+			replacement=True,
+			generator=torch.Generator().manual_seed(self.args.seed)
+		)
+		return DataLoader(
+			self.train_dataset,
+			batch_size=self.args.train_batch_size,
+			sampler=sampler,
+			collate_fn=self.data_collator,
+			num_workers=self.args.dataloader_num_workers,
+			pin_memory=self.args.dataloader_pin_memory,
+			drop_last=self.args.dataloader_drop_last,
+		)
+		

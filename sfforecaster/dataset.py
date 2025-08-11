@@ -53,6 +53,56 @@ def get_target_maps():
 	return id2label, label2id, id2target	
 
 
+def compute_class_weights_from_dataset(train_ds, num_classes, scheme="balanced"):
+	""" Compute class weights from torch dataset """
+    
+	# - Collect labels
+	ys = []
+	for i in range(len(train_ds)):
+		y = train_ds[i]["labels"]
+		if torch.is_tensor(y):
+			y = y.item()
+		ys.append(int(y))
+	counts = np.bincount(ys, minlength=num_classes).astype(float)
+
+	if scheme == "inverse":
+		w = 1.0 / np.maximum(counts, 1.0)
+	else:
+		# "balanced" like sklearn: n_samples / (n_classes * count_c)
+		n = counts.sum()
+		w = n / (num_classes * np.maximum(counts, 1.0))
+
+	# optional normalization (keeps average weight ~1)
+	w = w * (num_classes / w.sum())
+	
+	return torch.tensor(w, dtype=torch.float32)
+	
+def compute_sample_weights_from_dataset(train_ds, num_classes, scheme="balanced"):
+	"""
+		Returns a list of length len(train_ds) with per-example sampling weights.
+		Typically inverse frequency by class, normalized.
+	"""
+
+	ys = []
+	for i in range(len(train_ds)):
+		y = train_ds[i]["labels"]
+		if torch.is_tensor(y):
+			y = y.item()
+		ys.append(int(y))
+
+	counts = np.bincount(ys, minlength=num_classes).astype(float)
+	n = counts.sum()
+
+	if scheme == "inverse":
+		class_w = 1.0 / np.maximum(counts, 1.0)
+	else:
+		class_w = n / (num_classes * np.maximum(counts, 1.0))
+
+	class_w = class_w * (num_classes / class_w.sum())
+	sw = [class_w[y] for y in ys]
+    
+	return sw
+
 ######################################
 ###      DATASET BASE CLASS
 ######################################

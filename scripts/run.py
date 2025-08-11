@@ -49,8 +49,10 @@ from sfforecaster.model import MultiHorizonVideoMAE
 from sfforecaster.utils import *
 from sfforecaster.dataset import get_target_maps
 from sfforecaster.dataset import VideoDataset, ImgDataset, ImgStackDataset
+from sfforecaster.dataset import compute_class_weights_from_dataset, compute_sample_weights_from_dataset
 from sfforecaster.custom_transforms import FlippingTransform, Rotate90Transform
 from sfforecaster.metrics import build_multi_label_metrics, build_single_label_metrics
+from sfforecaster.trainer import AdvancedImbalanceTrainer
 from sfforecaster import logger
 
 # - Configure transformer logging
@@ -132,6 +134,12 @@ def get_args():
 	
 	parser.add_argument('--drop_last', dest='drop_last', action='store_true',help='Drop last incomplete batch (default=false)')	
 	parser.set_defaults(drop_last=False)
+	
+	# - Imbalanced trainer options
+	parser.add_argument("--use_weighted_loss", dest='use_weighted_loss', action="store_true", default=False, help="Use class-weighted loss (CE or focal alpha).")
+	parser.add_argument("--use_weighted_sampler", dest='use_weighted_sampler', action="store_true", default=False, help="Use a WeightedRandomSampler for training.")
+	parser.add_argument("--loss_type", dest='loss_type', type=str, choices=["ce", "focal"], default="ce", help="Loss type: standard cross-entropy or focal loss.")
+	parser.add_argument("--focal_gamma", dest='focal_gamma', type=float, default=2.0, help="Focal loss gamma (focusing parameter).")
 
 	# - Run options
 	parser.add_argument('-device', '--device', dest='device', required=False, type=str, default="cuda:0", action='store',help='Device identifier')
@@ -766,16 +774,57 @@ def main():
 	else:
 		compute_metrics_custom= build_single_label_metrics(label_names)
 		
+	# - Compute class weights
+	num_labels = model.config.num_labels
+	class_weights= None
+	if args.use_weighted_loss:
+		class_weights = compute_class_weights_from_dataset(dataset, num_labels, scheme="balanced")
+		print("--> CLASS WEIGHTS")
+		print(class_weights)
+	
+	# - Compute weights for data sampler
+	sample_weights = None
+	if args.use_weighted_sampler:
+		sample_weights = compute_sample_weights_from_dataset(
+			train_ds=dataset,
+			num_classes=num_labels,
+			scheme="balanced"
+		)
+		
+	# Set focal loss pars
+	#   - For focal alpha in multiclass, you can re-use class_weights
+	#   - Often alpha ~ class_weights (normalized); you can also pass a float.
+	focal_alpha = class_weights if args.loss_type == "focal" else None		
+		
 	# - Set trainer
-	trainer = Trainer(
-		model=model,
-		args=training_opts,
-		train_dataset=dataset,
-		eval_dataset=dataset_cv,
-		compute_metrics=compute_metrics_custom,		
-		processing_class=image_processor,
-		data_collator=collate_fn
-	)
+	if args.class_weighted_trainer:
+		logger.info("Using custom class-weighted loss trainer ...")
+		trainer = AdvancedImbalanceTrainer(
+			model=model,
+			args=training_opts,
+			train_dataset=dataset,
+			eval_dataset=dataset_cv,
+			compute_metrics=compute_metrics_custom,
+			processing_class=image_processor,
+			data_collator=collate_fn,
+			class_weights=class_weights,
+			multilabel=bool(args.multilabel),
+			loss_type=args.loss_type,                  # "ce" or "focal"
+			focal_gamma=args.focal_gamma,
+			focal_alpha=focal_alpha,              # tensor[C] or float or None
+			sample_weights=sample_weights,        # enables WeightedRandomSampler
+		)
+	else:
+		logger.info("Using standard trainer ...")
+		trainer = Trainer(
+			model=model,
+			args=training_opts,
+			train_dataset=dataset,
+			eval_dataset=dataset_cv,
+			compute_metrics=compute_metrics_custom,		
+			processing_class=image_processor,
+			data_collator=collate_fn
+		)
 	
 	#######################################
 	##     RUN TEST
