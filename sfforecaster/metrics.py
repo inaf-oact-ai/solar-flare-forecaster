@@ -211,9 +211,11 @@ def single_label_metrics(predictions, labels, target_names=None):
 	
 	recall= recall_score(y_true=y_true, y_pred=y_pred, average='weighted', labels=label_indices, zero_division=0)
 	
-	f1score= f1_score(y_true=y_true, y_pred=y_pred, average='weighted', labels=label_indices, zero_division=0)
+	f1score_weighted= f1_score(y_true=y_true, y_pred=y_pred, average='weighted', labels=label_indices, zero_division=0)
 	
 	f1score_micro = f1_score(y_true=y_true, y_pred=y_pred, average='micro', labels=label_indices, zero_division=0)
+	
+	f1score_macro = f1_score(y_true=y_true, y_pred=y_pred, average='macro', labels=label_indices, zero_division=0)
 	
 	cm= confusion_matrix(y_true, y_pred, labels=label_indices)
 	cm_norm= confusion_matrix(y_true, y_pred, labels=label_indices, normalize="true")
@@ -283,12 +285,16 @@ def single_label_metrics(predictions, labels, target_names=None):
 	# - Compute summary metrics
 	hss_summary = summarize_per_class(HSS, support)
 	tss_summary = summarize_per_class(TSS, support)
-	gss_summary = summarize_per_class(GSS, support)		
+	gss_summary = summarize_per_class(GSS, support)
+	tpr_summary = summarize_per_class(TPR, support)	
+	tnr_summary = summarize_per_class(TNR, support)	
 			
 	print(f"FP={FP}, FN={FN}, TP={TP}, TN={TN}, ACC={ACC}, accuracy={accuracy}, TSS={TSS}, HSS={HSS}, GSS={GSS}, MCC={MCC}, MCC_coeff={MCC_coeff}")
 	print(f"HSS: {hss_summary}")
 	print(f"TSS: {tss_summary}")
 	print(f"GSS: {gss_summary}")
+	print(f"TPR: {tpr_summary}")
+	print(f"TPR: {tnr_summary}")
 	
 	# - Return as dictionary
 	metrics = {
@@ -296,8 +302,9 @@ def single_label_metrics(predictions, labels, target_names=None):
 		'accuracy': accuracy,
 		'recall': recall,
 		'precision': precision,
-		'f1score': f1score,
+		'f1score_weighted': f1score_weighted,
 		'f1score_micro': f1score_micro,
+		'f1score_macro': f1score_macro,
 		'class_report': class_report,
 		'confusion_matrix': cm.tolist(),# to make it serialized in json save
 		'confusion_matrix_norm': cm_norm.tolist(), # to make it serialized in json save
@@ -316,6 +323,8 @@ def single_label_metrics(predictions, labels, target_names=None):
 		'hss': HSS,
 		'gss': GSS,
 		'mcc': MCC_coeff,
+		'tpr_summary': tpr_summary,
+		'tnr_summary': tnr_summary,
 		'hss_summary': hss_summary,
 		'tss_summary': tss_summary,
 		'gss_summary': gss_summary,
@@ -345,8 +354,9 @@ def build_single_label_metrics(target_names):
 			"accuracy": metrics["accuracy"],
 			"precision": metrics["precision"],
 			"recall": metrics["recall"],
-			"f1score": metrics["f1score"],
+			"f1score_weighted": metrics["f1score_weighted"],
 			"f1score_micro": metrics["f1score_micro"],
+			"f1score_macro": metrics["f1score_macro"],
 			#"fp": metrics["fp"],
 			#"fn": metrics["fn"],
 			#"tp": metrics["tp"],
@@ -362,6 +372,10 @@ def build_single_label_metrics(target_names):
 			#"hss": metrics["hss"],
 			#"gss": metrics["gss"],
 			"mcc": metrics["mcc"],
+			"tpr_macro": metrics["tpr_summary"]["macro"],
+			"tpr_weighted": metrics["tpr_summary"]["weighted"],
+			"tnr_macro": metrics["tnr_summary"]["macro"],
+			"tnr_weighted": metrics["tnr_summary"]["weighted"],
 			"hss_macro": metrics["hss_summary"]["macro"],
 			"tss_macro": metrics["tss_summary"]["macro"],
 			"gss_macro": metrics["gss_summary"]["macro"],
