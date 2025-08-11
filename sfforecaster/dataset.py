@@ -59,7 +59,8 @@ def compute_class_weights_from_dataset(train_ds, num_classes, scheme="balanced")
 	# - Collect labels
 	ys = []
 	for i in range(len(train_ds)):
-		y = train_ds[i]["labels"]
+		#y = train_ds[i]["labels"]
+		y = train_ds[i][1]
 		if torch.is_tensor(y):
 			y = y.item()
 		ys.append(int(y))
@@ -85,7 +86,8 @@ def compute_sample_weights_from_dataset(train_ds, num_classes, scheme="balanced"
 
 	ys = []
 	for i in range(len(train_ds)):
-		y = train_ds[i]["labels"]
+		#y = train_ds[i]["labels"]
+		y = train_ds[i][1]
 		if torch.is_tensor(y):
 			y = y.item()
 		ys.append(int(y))
