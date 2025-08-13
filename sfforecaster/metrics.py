@@ -69,6 +69,69 @@ def summarize_metrics_per_class(scores, support):
 	weighted = np.nansum(scores * (support / (support.sum() + eps)))
 	return {"macro": macro, "weighted": weighted, "per_class": scores}
 
+
+def compute_global_metrics_from_confusion_matrix(cm, eps=1e-7):
+	"""
+		Compute micro/global skill scores by first summing TP,FP,FN,TN across classes,
+		then applying the binary formulas once to those totals.
+	"""
+	cm = cm.astype(np.float64)
+	TP_c = np.diag(cm)
+	FP_c = cm.sum(axis=0) - TP_c
+	FN_c = cm.sum(axis=1) - TP_c
+	TN_c = cm.sum() - (TP_c + FP_c + FN_c)
+
+	# - Global totals (micro aggregation)
+	TP = TP_c.sum()
+	FP = FP_c.sum()
+	FN = FN_c.sum()
+	TN = TN_c.sum()
+	N  = TP + FP + FN + TN
+
+	# - Rates/precisions
+	TPR = TP / (TP + FN + eps)      # recall/sensitivity
+	TNR = TN / (TN + FP + eps)      # specificity
+	PPV = TP / (TP + FP + eps)      # precision
+	NPV = TN / (TN + FN + eps)
+	FPR = FP / (FP + TN + eps)
+	FNR = FN / (TP + FN + eps)
+	FDR = FP / (TP + FP + eps)
+
+	# - Skill scores from global totals
+	TSS = TPR + TNR - 1
+
+	# - Heidke Skill Score (equitable / HSS2) from global totals	
+	HSS = (2.0 * (TP*TN - FP*FN)) / (
+		(TP+FN)*(FN+TN) + (TP+FP)*(FP+TN) + eps
+	)
+
+	# Gilbert Skill Score / ETS
+	# Expected random hits:
+	TP_rand = (TP + FN) * (TP + FP) / (N + eps)
+	GSS = (TP - TP_rand) / ((TP + FP + FN) - TP_rand + eps)
+
+	overall_acc = (TP + TN) / (N + eps)
+
+	return {
+		"TP": TP, 
+		"FP": FP, 
+		"FN": FN, 
+		"TN": TN, 
+		"N": N,
+		"TPR": TPR, 
+		"TNR": TNR, 
+		"PPV": PPV, 
+		"NPV": NPV,
+		"FPR": FPR, 
+		"FNR": FNR, 
+		"FDR": FDR,
+		"TSS": TSS, 
+		"HSS": HSS, 
+		"GSS": GSS,
+		"overall_accuracy": overall_acc
+	}
+
+
 ###########################################
 ##   MULTI-LABEL CLASS METRICS
 ###########################################
@@ -296,6 +359,9 @@ def single_label_metrics(predictions, labels, target_names=None):
 	print(f"TPR: {tpr_summary}")
 	print(f"TPR: {tnr_summary}")
 	
+	# - Compute global metrics (as done in other papers)
+	metrics_global= compute_global_metrics_from_confusion_matrix
+	
 	# - Return as dictionary
 	metrics = {
 		'class_names': class_names,
@@ -328,6 +394,21 @@ def single_label_metrics(predictions, labels, target_names=None):
 		'hss_summary': hss_summary,
 		'tss_summary': tss_summary,
 		'gss_summary': gss_summary,
+		'fp_g': metrics_global['FP'],
+		'fn_g': metrics_global['FN'],
+		'tp_g': metrics_global['TP'],
+		'tn_g': metrics_global['TN'],
+		'tpr_g': metrics_global['TPR'],
+		'tnr_g': metrics_global['TNR'],
+		'ppv_g': metrics_global['PPV'],
+		'npv_g': metrics_global['NPV'],
+		'fpr_g': metrics_global['FPR'],
+		'fnr_g': metrics_global['FNR'],
+		'fdr_g': metrics_global['FDR'],
+		'tss_g': metrics_global['TSS'],
+		'hss_g': metrics_global['HSS'],
+		'gss_g': metrics_global['GSS'],
+		'accuracy_g': metrics_global['overall_accuracy']
 	}
 	
 	print("--> metrics")
@@ -382,6 +463,11 @@ def build_single_label_metrics(target_names):
 			"hss_weighted": metrics["hss_summary"]["weighted"],
 			"tss_weighted": metrics["tss_summary"]["weighted"],
 			"gss_weighted": metrics["gss_summary"]["weighted"],
+			"tpr_g": metrics["tpr_g"],
+			"tnr_g": metrics["tnr_g"],
+			"hss_g": metrics["hss_g"],
+			"tss_g": metrics["tss_g"],
+			"gss_g": metrics["gss_g"],
 		}
 		
 		return metrics_scalar
