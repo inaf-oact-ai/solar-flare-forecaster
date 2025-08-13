@@ -152,6 +152,8 @@ def get_args():
 	parser.add_argument('--test', dest='test', action='store_true', help='Run model test on input data (default=false)')	
 	parser.set_defaults(test=False)
 	
+	parser.add_argument("--report_to", dest='report_to', type=str, default="wandb", help="Report logs/metrics to {wandb, none}")
+
 	# - Output options
 	parser.add_argument('-outdir','--outdir', dest='outdir', required=False, default="", type=str, help='Output data dir') 
 	parser.add_argument('--save_model_every_epoch', dest='save_model_every_epoch', action='store_true', help='Save model every epoch (default=false)')	
@@ -489,7 +491,8 @@ def load_training_opts(args):
 		logging_nan_inf_filter=False,
 		#disable_tqdm=True,
 		run_name=args.runname,
-    report_to="wandb",  # enable logging to W&B
+    #report_to="wandb",  # enable logging to W&B
+    report_to=args.report_to
 	)
 	
 	print("--> training options")
