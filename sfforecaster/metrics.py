@@ -293,9 +293,10 @@ def single_label_metrics(predictions, labels, target_names=None):
 	if target_names is not None:
 		class_names= target_names
 	else:
-		nclasses= y_true.shape[-1]
-		class_names= [str(item) for item in list(np.arange(0,nclasses))]
-	
+		#nclasses= y_true.shape[-1]
+		#class_names= [str(item) for item in list(np.arange(0,nclasses))]
+		class_names = [str(i) for i in label_indices]
+		
 	# - Compute true/false positive/negative
 	support = cm.sum(axis=1)
 	FP = cm.sum(axis=0) - np.diag(cm)  
@@ -357,7 +358,7 @@ def single_label_metrics(predictions, labels, target_names=None):
 	print(f"TSS: {tss_summary}")
 	print(f"GSS: {gss_summary}")
 	print(f"TPR: {tpr_summary}")
-	print(f"TPR: {tnr_summary}")
+	print(f"TNR: {tnr_summary}")
 	
 	# - Compute global metrics (as done in other papers)
 	metrics_global= compute_global_metrics_from_confusion_matrix(cm)
