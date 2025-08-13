@@ -70,6 +70,78 @@ def summarize_metrics_per_class(scores, support):
 	return {"macro": macro, "weighted": weighted, "per_class": scores}
 
 
+def compute_micro_metrics_from_confusion_matrix_v2(y_true, y_pred, class_names, eps=1e-7):
+	"""
+		Compute micro/global skill scores by first summing TP,FP,FN,TN across classes,
+		then applying the binary formulas once to those totals.
+	"""
+	
+	# - Compute multilabel confusion matrix
+	MCM = multilabel_confusion_matrix(
+		y_true,
+		y_pred,
+		sample_weight=None,
+		labels=class_names,
+		samplewise=False
+	)
+	
+	# - Compute TP/TN/FP/FN for each class
+	TN_c= np.array([int(MCM[i].ravel()[0]) for i in range(MCM.shape[0])])
+	FP_c= np.array([int(MCM[i].ravel()[1]) for i in range(MCM.shape[0])])
+	FN_c= np.array([int(MCM[i].ravel()[2]) for i in range(MCM.shape[0])])
+	TP_c= np.array([int(MCM[i].ravel()[3]) for i in range(MCM.shape[0])])
+	
+	# - Global totals (micro aggregation)
+	TP = TP_c.sum()
+	FP = FP_c.sum()
+	FN = FN_c.sum()
+	TN = TN_c.sum()
+	N  = TP + FP + FN + TN
+
+	# - Rates/precisions
+	TPR = TP / (TP + FN + eps)      # recall/sensitivity
+	TNR = TN / (TN + FP + eps)      # specificity
+	PPV = TP / (TP + FP + eps)      # precision
+	NPV = TN / (TN + FN + eps)
+	FPR = FP / (FP + TN + eps)
+	FNR = FN / (TP + FN + eps)
+	FDR = FP / (TP + FP + eps)
+
+	# - Skill scores from global totals
+	TSS = TPR + TNR - 1
+
+	# - Heidke Skill Score (equitable / HSS2) from global totals	
+	HSS = (2.0 * (TP*TN - FP*FN)) / (
+		(TP+FN)*(FN+TN) + (TP+FP)*(FP+TN) + eps
+	)
+
+	# Gilbert Skill Score / ETS
+	# Expected random hits:
+	TP_rand = (TP + FN) * (TP + FP) / (N + eps)
+	GSS = (TP - TP_rand) / ((TP + FP + FN) - TP_rand + eps)
+
+	overall_acc = (TP + TN) / (N + eps)
+
+	return {
+		"TP": TP, 
+		"FP": FP, 
+		"FN": FN, 
+		"TN": TN, 
+		"N": N,
+		"TPR": TPR, 
+		"TNR": TNR, 
+		"PPV": PPV, 
+		"NPV": NPV,
+		"FPR": FPR, 
+		"FNR": FNR, 
+		"FDR": FDR,
+		"TSS": TSS, 
+		"HSS": HSS, 
+		"GSS": GSS,
+		"overall_accuracy": overall_acc
+	}
+
+
 def compute_micro_metrics_from_confusion_matrix(cm, eps=1e-7):
 	"""
 		Compute micro/global skill scores by first summing TP,FP,FN,TN across classes,
