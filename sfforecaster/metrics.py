@@ -70,7 +70,7 @@ def summarize_metrics_per_class(scores, support):
 	return {"macro": macro, "weighted": weighted, "per_class": scores}
 
 
-def compute_global_metrics_from_confusion_matrix(cm, eps=1e-7):
+def compute_micro_metrics_from_confusion_matrix(cm, eps=1e-7):
 	"""
 		Compute micro/global skill scores by first summing TP,FP,FN,TN across classes,
 		then applying the binary formulas once to those totals.
@@ -361,7 +361,7 @@ def single_label_metrics(predictions, labels, target_names=None):
 	print(f"TNR: {tnr_summary}")
 	
 	# - Compute global metrics (as done in other papers)
-	metrics_global= compute_global_metrics_from_confusion_matrix(cm)
+	metrics_micro= compute_micro_metrics_from_confusion_matrix(cm)
 	
 	# - Return as dictionary
 	metrics = {
@@ -396,21 +396,21 @@ def single_label_metrics(predictions, labels, target_names=None):
 		'hss_summary': hss_summary,
 		'tss_summary': tss_summary,
 		'gss_summary': gss_summary,
-		'fp_g': metrics_global['FP'],
-		'fn_g': metrics_global['FN'],
-		'tp_g': metrics_global['TP'],
-		'tn_g': metrics_global['TN'],
-		'tpr_g': metrics_global['TPR'],
-		'tnr_g': metrics_global['TNR'],
-		'ppv_g': metrics_global['PPV'],
-		'npv_g': metrics_global['NPV'],
-		'fpr_g': metrics_global['FPR'],
-		'fnr_g': metrics_global['FNR'],
-		'fdr_g': metrics_global['FDR'],
-		'tss_g': metrics_global['TSS'],
-		'hss_g': metrics_global['HSS'],
-		'gss_g': metrics_global['GSS'],
-		'accuracy_g': metrics_global['overall_accuracy']
+		'fp_micro': metrics_micro['FP'],
+		'fn_micro': metrics_micro['FN'],
+		'tp_micro': metrics_micro['TP'],
+		'tn_micro': metrics_micro['TN'],
+		'tpr_micro': metrics_micro['TPR'],
+		'tnr_micro': metrics_micro['TNR'],
+		'ppv_micro': metrics_micro['PPV'],
+		'npv_micro': metrics_micro['NPV'],
+		'fpr_micro': metrics_micro['FPR'],
+		'fnr_micro': metrics_micro['FNR'],
+		'fdr_micro': metrics_micro['FDR'],
+		'tss_micro': metrics_micro['TSS'],
+		'hss_micro': metrics_micro['HSS'],
+		'gss_micro': metrics_micro['GSS'],
+		'accuracy_micro': metrics_micro['overall_accuracy']
 	}
 	
 	print("--> metrics")
@@ -465,11 +465,11 @@ def build_single_label_metrics(target_names):
 			"hss_weighted": metrics["hss_summary"]["weighted"],
 			"tss_weighted": metrics["tss_summary"]["weighted"],
 			"gss_weighted": metrics["gss_summary"]["weighted"],
-			"tpr_g": metrics["tpr_g"],
-			"tnr_g": metrics["tnr_g"],
-			"hss_g": metrics["hss_g"],
-			"tss_g": metrics["tss_g"],
-			"gss_g": metrics["gss_g"],
+			"tpr_micro": metrics["tpr_micro"],
+			"tnr_micro": metrics["tnr_micro"],
+			"hss_micro": metrics["hss_micro"],
+			"tss_micro": metrics["tss_micro"],
+			"gss_micro": metrics["gss_micro"],
 		}
 		
 		return metrics_scalar
