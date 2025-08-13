@@ -360,11 +360,12 @@ def single_label_metrics(predictions, labels, target_names=None):
 	print(f"TPR: {tnr_summary}")
 	
 	# - Compute global metrics (as done in other papers)
-	metrics_global= compute_global_metrics_from_confusion_matrix
+	metrics_global= compute_global_metrics_from_confusion_matrix(cm)
 	
 	# - Return as dictionary
 	metrics = {
 		'class_names': class_names,
+		'support': support,
 		'accuracy': accuracy,
 		'recall': recall,
 		'precision': precision,
