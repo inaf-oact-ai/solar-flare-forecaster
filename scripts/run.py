@@ -101,6 +101,10 @@ def get_args():
 	parser.add_argument('--vitloader', dest='vitloader', action='store_true', help='If enabled use ViTForImageClassification to load model otherwise AutoModelForImageClassification (default=false)')	
 	parser.set_defaults(vitloader=False)
 	
+	parser.add_argument('--binary', dest='binary', action='store_true',help='Choose binary classification label scheme (default=false)')	
+	parser.set_defaults(binary=False)
+	parser.add_argument('-flare_thr', '--flare_thr', dest='flare_thr', required=False, type=str, default='C', action='store',help='Choose flare class label name: {C-->label=C+,M-->label=M+}.')
+	
 	parser.add_argument('--multilabel', dest='multilabel', action='store_true',help='Do multilabel classification (default=false)')	
 	parser.set_defaults(multilabel=False)
 	parser.add_argument('--multiout', dest='multiout', action='store_true',help='Do multi-step forecasting classification (default=false)')	
@@ -695,7 +699,7 @@ def main():
 	multiout= args.multiout
 	
 	# - Set config options
-	id2label, label2id, id2target= get_target_maps()
+	id2label, label2id, id2target= get_target_maps(binary=args.binary, flare_thr=args.flare_thr)
 	num_labels= len(id2label)  # - If skip_first_class, this is =3
 	nclasses= num_labels
 	label_names= list(label2id.keys())

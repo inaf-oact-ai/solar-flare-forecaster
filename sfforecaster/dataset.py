@@ -30,22 +30,44 @@ from sfforecaster.utils import *
 ######################################
 ###      CLASS LABEL SCHEMA
 ######################################
-def get_target_maps():
+def get_target_maps(binary=False, flare_thr="C"):
 	""" Return dictionary of id vs targets """
 
-	id2target= {
-		0: 0, # NONE
-		1: 1,  # C FLARE
-		2: 2,  # M FLARE
-		3: 3,  # X FLARE
-	}
+	if binary:
+		id2target= {
+			0: 0, # NONE
+			1: 1,  # FLARE 
+		}
+		if flare_thr=="C":
+			id2label= {
+				0: "NONE",
+				1: "C+",
+			}
+		elif flare_thr=="M":
+			id2label= {
+				0: "NONE",
+				1: "M+",
+			}
+		else:
+			id2label= {
+				0: "NONE",
+				1: "FLARE",
+			}
+		
+	else:
+		id2target= {
+			0: 0, # NONE
+			1: 1,  # C FLARE
+			2: 2,  # M FLARE
+			3: 3,  # X FLARE
+		}
 			
-	id2label= {
-		0: "NONE",
-		1: "C",
-		2: "M",
-		3: "X",
-	}
+		id2label= {
+			0: "NONE",
+			1: "C",
+			2: "M",
+			3: "X",
+		}
 		
 	# - Compute reverse dict
 	label2id= {v: k for k, v in id2label.items()}
