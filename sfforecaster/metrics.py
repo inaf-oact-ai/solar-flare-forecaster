@@ -370,11 +370,17 @@ def single_label_metrics(predictions, labels, target_names=None):
 		class_names = [str(i) for i in label_indices]
 		
 	# - Compute true/false positive/negative
+	#   NB: Distinguish the case of binary vs multiclass
 	support = cm.sum(axis=1)
-	FP = cm.sum(axis=0) - np.diag(cm)  
-	FN = cm.sum(axis=1) - np.diag(cm)
-	TP = np.diag(cm)
-	TN = cm.sum() - (FP + FN + TP)
+	
+	binary_class= len(class_names) == 2
+	if binary_class:
+		TN, FP, FN, TP= cm.ravel()         # these are scalars
+	else:
+		FP = cm.sum(axis=0) - np.diag(cm)  # there are arrays
+		FN = cm.sum(axis=1) - np.diag(cm)
+		TP = np.diag(cm)
+		TN = cm.sum() - (FP + FN + TP)
 	
 	eps= 1.e-7
 	
@@ -418,22 +424,24 @@ def single_label_metrics(predictions, labels, target_names=None):
 	MCC= ((TP*TN)-(FP*FN))/np.sqrt( (TP+FP)*(TP+FN)*(TN+FP)*(TN+FN) )
 	MCC_coeff= matthews_corrcoef(y_true=y_true, y_pred=y_pred)
 			
-	# - Compute summary metrics
-	hss_summary = summarize_metrics_per_class(HSS, support)
-	tss_summary = summarize_metrics_per_class(TSS, support)
-	gss_summary = summarize_metrics_per_class(GSS, support)
-	tpr_summary = summarize_metrics_per_class(TPR, support)	
-	tnr_summary = summarize_metrics_per_class(TNR, support)	
-			
 	print(f"FP={FP}, FN={FN}, TP={TP}, TN={TN}, ACC={ACC}, accuracy={accuracy}, TSS={TSS}, HSS={HSS}, GSS={GSS}, MCC={MCC}, MCC_coeff={MCC_coeff}")
-	print(f"HSS: {hss_summary}")
-	print(f"TSS: {tss_summary}")
-	print(f"GSS: {gss_summary}")
-	print(f"TPR: {tpr_summary}")
-	print(f"TNR: {tnr_summary}")
 	
-	# - Compute global metrics (as done in other papers)
-	metrics_micro= compute_micro_metrics_from_confusion_matrix(cm)
+	# - Compute summary metrics
+	if not binary_class:
+		hss_summary = summarize_metrics_per_class(HSS, support)
+		tss_summary = summarize_metrics_per_class(TSS, support)
+		gss_summary = summarize_metrics_per_class(GSS, support)
+		tpr_summary = summarize_metrics_per_class(TPR, support)	
+		tnr_summary = summarize_metrics_per_class(TNR, support)	
+			
+		print(f"HSS: {hss_summary}")
+		print(f"TSS: {tss_summary}")
+		print(f"GSS: {gss_summary}")
+		print(f"TPR: {tpr_summary}")
+		print(f"TNR: {tnr_summary}")
+	
+		# - Compute global metrics (as done in other papers)
+		metrics_micro= compute_micro_metrics_from_confusion_matrix(cm)
 	
 	# - Return as dictionary
 	metrics = {
@@ -462,28 +470,34 @@ def single_label_metrics(predictions, labels, target_names=None):
 		'tss': TSS,
 		'hss': HSS,
 		'gss': GSS,
-		'mcc': MCC_coeff,
-		'tpr_summary': tpr_summary,
-		'tnr_summary': tnr_summary,
-		'hss_summary': hss_summary,
-		'tss_summary': tss_summary,
-		'gss_summary': gss_summary,
-		'fp_micro': metrics_micro['FP'],
-		'fn_micro': metrics_micro['FN'],
-		'tp_micro': metrics_micro['TP'],
-		'tn_micro': metrics_micro['TN'],
-		'tpr_micro': metrics_micro['TPR'],
-		'tnr_micro': metrics_micro['TNR'],
-		'ppv_micro': metrics_micro['PPV'],
-		'npv_micro': metrics_micro['NPV'],
-		'fpr_micro': metrics_micro['FPR'],
-		'fnr_micro': metrics_micro['FNR'],
-		'fdr_micro': metrics_micro['FDR'],
-		'tss_micro': metrics_micro['TSS'],
-		'hss_micro': metrics_micro['HSS'],
-		'gss_micro': metrics_micro['GSS'],
-		'accuracy_micro': metrics_micro['overall_accuracy']
+		'mcc': MCC_coeff
 	}
+	
+	if not binary:
+		metrics.update(
+			{
+			'tpr_summary': tpr_summary,
+			'tnr_summary': tnr_summary,
+			'hss_summary': hss_summary,
+			'tss_summary': tss_summary,
+			'gss_summary': gss_summary,
+			'fp_micro': metrics_micro['FP'],
+			'fn_micro': metrics_micro['FN'],
+			'tp_micro': metrics_micro['TP'],
+			'tn_micro': metrics_micro['TN'],
+			'tpr_micro': metrics_micro['TPR'],
+			'tnr_micro': metrics_micro['TNR'],
+			'ppv_micro': metrics_micro['PPV'],
+			'npv_micro': metrics_micro['NPV'],
+			'fpr_micro': metrics_micro['FPR'],
+			'fnr_micro': metrics_micro['FNR'],
+			'fdr_micro': metrics_micro['FDR'],
+			'tss_micro': metrics_micro['TSS'],
+			'hss_micro': metrics_micro['HSS'],
+			'gss_micro': metrics_micro['GSS'],
+			'accuracy_micro': metrics_micro['overall_accuracy']
+		}
+	)
 	
 	print("--> metrics")
 	print(metrics)
@@ -512,38 +526,52 @@ def build_single_label_metrics(target_names):
 			"f1score_weighted": metrics["f1score_weighted"],
 			"f1score_micro": metrics["f1score_micro"],
 			"f1score_macro": metrics["f1score_macro"],
-			#"fp": metrics["fp"],
-			#"fn": metrics["fn"],
-			#"tp": metrics["tp"],
-			#"tn": metrics["tn"],
-			#"tpr": metrics["tpr"],
-			#"tnr": metrics["tnr"],
-			#"ppv": metrics["ppv"],
-			#"npv": metrics["npv"],
-			#"fpr": metrics["fpr"],
-			#"fnr": metrics["fnr"],
-			#"fdr": metrics["fdr"],
-			#"tss": metrics["tss"],
-			#"hss": metrics["hss"],
-			#"gss": metrics["gss"],
 			"mcc": metrics["mcc"],
-			"tpr_macro": metrics["tpr_summary"]["macro"],
-			"tpr_weighted": metrics["tpr_summary"]["weighted"],
-			"tnr_macro": metrics["tnr_summary"]["macro"],
-			"tnr_weighted": metrics["tnr_summary"]["weighted"],
-			"hss_macro": metrics["hss_summary"]["macro"],
-			"tss_macro": metrics["tss_summary"]["macro"],
-			"gss_macro": metrics["gss_summary"]["macro"],
-			"hss_weighted": metrics["hss_summary"]["weighted"],
-			"tss_weighted": metrics["tss_summary"]["weighted"],
-			"gss_weighted": metrics["gss_summary"]["weighted"],
-			"tpr_micro": metrics["tpr_micro"],
-			"tnr_micro": metrics["tnr_micro"],
-			"hss_micro": metrics["hss_micro"],
-			"tss_micro": metrics["tss_micro"],
-			"gss_micro": metrics["gss_micro"],
 		}
 		
+		# - Check if TP, FN etc are scalars
+		if np.isscalar(metrics["fp"]):
+			metrics_scalar.update(
+				{
+					"fp": metrics["fp"],
+					"fn": metrics["fn"],
+					"tp": metrics["tp"],
+					"tn": metrics["tn"],
+					"tpr": metrics["tpr"],
+					"tnr": metrics["tnr"],
+					"ppv": metrics["ppv"],
+					"npv": metrics["npv"],
+					"fpr": metrics["fpr"],
+					"fnr": metrics["fnr"],
+					"fdr": metrics["fdr"],
+					"tss": metrics["tss"],
+					"hss": metrics["hss"],
+					"gss": metrics["gss"],
+				}
+			)
+		
+		# - Check if summary metrics are present (multiclass)
+		if "tpr_summary" in metrics:
+			metrics_scalar.update(
+				{
+					"tpr_macro": metrics["tpr_summary"]["macro"],
+					"tpr_weighted": metrics["tpr_summary"]["weighted"],
+					"tnr_macro": metrics["tnr_summary"]["macro"],
+					"tnr_weighted": metrics["tnr_summary"]["weighted"],
+					"hss_macro": metrics["hss_summary"]["macro"],
+					"tss_macro": metrics["tss_summary"]["macro"],
+					"gss_macro": metrics["gss_summary"]["macro"],
+					"hss_weighted": metrics["hss_summary"]["weighted"],
+					"tss_weighted": metrics["tss_summary"]["weighted"],
+					"gss_weighted": metrics["gss_summary"]["weighted"],
+					"tpr_micro": metrics["tpr_micro"],
+					"tnr_micro": metrics["tnr_micro"],
+					"hss_micro": metrics["hss_micro"],
+					"tss_micro": metrics["tss_micro"],
+					"gss_micro": metrics["gss_micro"],
+				}
+			)
+			
 		return metrics_scalar
 		
 	return compute_single_label_metrics
