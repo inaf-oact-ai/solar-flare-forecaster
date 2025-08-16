@@ -473,7 +473,7 @@ def single_label_metrics(predictions, labels, target_names=None):
 		'mcc': MCC_coeff
 	}
 	
-	if not binary:
+	if not binary_class:
 		metrics.update(
 			{
 			'tpr_summary': tpr_summary,
