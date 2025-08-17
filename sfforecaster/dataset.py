@@ -224,6 +224,11 @@ class BaseVisDataset(Dataset):
 		
 		return img
 		
+	def load_flareid(self, idx):
+		""" Load single-class/single-out target """
+			
+		return self.datalist[idx]['flare_id']
+		
 	def load_target(self, idx, id2target):
 		""" Load single-class/single-out target """
 			
@@ -319,7 +324,33 @@ class BaseVisDataset(Dataset):
 		class_w = class_w * (num_classes / class_w.sum())
 		sw = [class_w[y] for y in ys]
     
+		return sw
+		
+	def compute_sample_weights_from_flareid(self, num_classes=4, scheme="balanced"):
+		"""
+			Returns a list of length len(train_ds) with per-example sampling weights.
+			Typically inverse frequency by class, normalized.
+		"""
+
+		# - Collect labels
+		ys = []
+		for i in range(len(self.datalist)):
+			y= self.load_flareid(i)
+			ys.append(int(y))
+		
+		counts = np.bincount(ys, minlength=num_classes).astype(float)
+		n = counts.sum()
+
+		if scheme == "inverse":
+			class_w = 1.0 / np.maximum(counts, 1.0)
+		else:
+			class_w = n / (num_classes * np.maximum(counts, 1.0))
+
+		class_w = class_w * (num_classes / class_w.sum())
+		sw = [class_w[y] for y in ys]
+    
 		return sw	
+		
 		
 	def __len__(self):
 		return len(self.datalist)

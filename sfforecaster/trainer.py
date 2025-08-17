@@ -178,9 +178,11 @@ class AdvancedImbalanceTrainer(Trainer):
 		""" Get train dataloader with resampling """
 		
 		if self.sample_weights is None:
+			logger.info("No sample weights given, returning standard train dataloader ...")
 			return super().get_train_dataloader()
 
 		# - Weighted sampler (per-example) — replacement=True is standard here
+		logger.info("Creating weighted random sampler ...")
 		sampler = WeightedRandomSampler(
 			weights=self.sample_weights,
 			num_samples=len(self.sample_weights),
