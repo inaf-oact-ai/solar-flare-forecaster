@@ -351,7 +351,63 @@ class BaseVisDataset(Dataset):
     
 		return sw	
 		
+	def compute_mild_focal_alpha_from_dataset(
+		self,
+		num_classes,
+		id2target,
+		use_flareid= False,
+		exponent= 0.5,     # use 0.5 for sqrt inverse-frequency
+		cap_ratio= 10.0,   # cap at <= 10× median weight
+		device= "cpu",
+		dtype= torch.float32,
+	):
+		"""
+			Returns a torch.Tensor of shape [num_classes] to be used as focal alpha.
+				- Start from class frequencies (counts / total).
+				- Compute inverse-frequency^exponent (e.g., 1/sqrt(freq)).
+				- Normalize so mean(alpha)=1 (nice for loss scale).
+				- Cap at <= cap_ratio × median(alpha).
+		"""
+
+		# - Collect labels
+		ys = []
+		if use_flareid:
+			for i in range(len(self.datalist)):
+				y= self.load_flareid(i)
+				ys.append(int(y))
+		else:
+			for i in range(len(self.datalist)):
+				y= self.load_target(i, id2target)
+				ys.append(int(y))		
+
+		counts = np.bincount(ys, minlength=num_classes).astype(float)
+		total = counts.sum()
+    
+		# - Avoid division by zero and handle missing classes
+		eps = 1e-8
+		freqs = counts / max(total, 1)
+		freqs = np.clip(freqs, eps, 1.0)
+
+		# - inverse-frequency^exponent
+		inv = np.power(1.0 / freqs, exponent)
+
+		# - normalize: mean(alpha)=1 (keeps loss scale stable)
+		alpha = inv / inv.mean()
+
+		# - cap extremes: <= cap_ratio × median(alpha)
+		med = np.median(alpha)
+		cap = med * cap_ratio
+		alpha = np.minimum(alpha, cap)
+
+		# - (optional) tiny floor to avoid exact zeros after numeric ops
+		alpha = np.maximum(alpha, 1e-6)
+
+		# - torch tensor
+		alpha_t = torch.tensor(alpha, dtype=dtype, device=device)
 		
+		#return alpha_t, counts
+		return alpha_t
+			
 	def __len__(self):
 		return len(self.datalist)
 			

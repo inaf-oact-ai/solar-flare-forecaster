@@ -146,7 +146,8 @@ def get_args():
 	
 	parser.add_argument("--loss_type", dest='loss_type', type=str, choices=["ce", "focal"], default="ce", help="Loss type: standard cross-entropy or focal loss.")
 	parser.add_argument("--focal_gamma", dest='focal_gamma', type=float, default=2.0, help="Focal loss gamma (focusing parameter).")
-
+	parser.add_argument("--set_focal_alpha_to_mild_estimate", dest='set_focal_alpha_to_mild_estimate', action="store_true", default=False, help="Set focal alpha to mild estimate, otherwise to class_weights.")
+	
 	# - Run options
 	parser.add_argument('-device', '--device', dest='device', required=False, type=str, default="cuda:0", action='store',help='Device identifier')
 	parser.add_argument('-runname', '--runname', dest='runname', required=False, type=str, default="llava_1.5_radio", action='store',help='Run name')
@@ -816,7 +817,24 @@ def main():
 	# Set focal loss pars
 	#   - For focal alpha in multiclass, you can re-use class_weights
 	#   - Often alpha ~ class_weights (normalized); you can also pass a float.
-	focal_alpha = class_weights if args.loss_type == "focal" else None		
+	if args.set_focal_alpha_to_mild_estimate:
+		logger.info("Setting focal alpha to mild estimate ...")
+		focal_alpha= dataset.compute_mild_focal_alpha_from_dataset(
+    	num_classes=4 if args.sample_weight_from_flareid else num_labels,
+    	id2target=id2target,
+			exponent=0.5,
+			cap_ratio=10.0,
+			device="cuda" if torch.cuda.is_available() else "cpu"
+		)
+	else:
+		logger.info("Setting focal alpha to class_weights if not None ...")
+		focal_alpha = class_weights if args.loss_type == "focal" else None	
+	
+	if args.loss_type=="focal":
+		print("--> FOCAL GAMMA")
+		print(focal_gamma)
+		print("--> FOCAL ALPHA")
+		print(focal_alpha)
 		
 	# - Set trainer
 	if args.use_custom_trainer:
