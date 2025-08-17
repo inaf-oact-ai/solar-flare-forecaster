@@ -802,7 +802,7 @@ def main():
 	if args.use_weighted_sampler:
 		if args.sample_weight_from_flareid:
 			logger.info("Computing sample weights from dataset flare_id data ...")
-			sample_weights = dataset.compute_sample_weights(
+			sample_weights = dataset.compute_sample_weights_from_flareid(
 				num_classes=4,
 				scheme="balanced"
 			)
