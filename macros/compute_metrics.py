@@ -57,6 +57,8 @@ LABEL2ID= {
 	"X": 3
 }
 
+LABELS= {"NONE", "C", "M", "X"}
+
 LABEL2ID_BINARY_CTHR= {
 	"NONE": 0,
 	"C": 1,
@@ -64,12 +66,16 @@ LABEL2ID_BINARY_CTHR= {
 	"X": 1
 }
 
+LABELS_BINARY_CTHR= {"NONE", "C+"}
+
 LABEL2ID_BINARY_MTHR= {
 	"NONE": 0,
 	"C": 0,
 	"M": 1,
 	"X": 1
 }
+
+LABELS_BINARY_MTHR= {"NONE", "M+"}
 
 ID_REMAP= {
 	0: 0,
@@ -390,16 +396,18 @@ def main():
 		return 1
 		
 	label2id= LABEL2ID
+	target_names= LABELS
 	if args.binary:
 		if args.flare_thr=="C":
 			label2id= LABEL2ID_BINARY_CTHR
+			target_names= LABELS_BINARY_CTHR
 		elif args.flare_thr=="M":
 			label2id= LABEL2ID_BINARY_MTHR
+			target_names= LABELS_BINARY_MTHR
 		else:
 			print(f"ERROR: Invalid/unsupported flare_thr {args.flare_thr}!")
 			return 1
 		
-	label_names= list(label2id.keys())
 	
 	#===========================
 	#==   READ INPUTFILE
@@ -430,7 +438,7 @@ def main():
 	#==   COMPUTE METRICS
 	#===========================
 	print("INFO: Computing metrics ...")
-	metrics= compute_single_label_metrics(y_true, y_pred, label_names)
+	metrics= compute_single_label_metrics(y_true, y_pred, target_names)
 		
 	print("--> metrics")
 	print(metrics)
