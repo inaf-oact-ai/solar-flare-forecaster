@@ -1,7 +1,25 @@
+#!/usr/bin/env python
+
+from __future__ import print_function
+
+##################################################
+###          MODULE IMPORT
+##################################################
+# - STANDARD MODULES
 import os
 import sys
 import json
 import numpy as np
+import argparse
+
+# - SKLEARN
+from sklearn import metrics
+from sklearn.metrics import f1_score, roc_auc_score, accuracy_score, recall_score, precision_score
+from sklearn.metrics import accuracy_score, hamming_loss
+from sklearn.metrics import classification_report
+from sklearn.metrics import confusion_matrix, multilabel_confusion_matrix
+from sklearn.metrics import hamming_loss
+from sklearn.metrics import matthews_corrcoef
 
 ###########################
 ##     ARGS
