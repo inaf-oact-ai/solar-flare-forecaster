@@ -410,6 +410,11 @@ def main():
 			print(f"ERROR: Invalid/unsupported flare_thr {args.flare_thr}!")
 			return 1
 		
+	print("label2id")
+	print(label2id)
+	
+	print("target_names")
+	print(target_names)
 	
 	#===========================
 	#==   READ INPUTFILE
