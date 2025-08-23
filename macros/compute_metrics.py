@@ -128,27 +128,17 @@ def summarize_metrics_per_class(scores, support):
 	return {"macro": macro, "weighted": weighted, "per_class": scores}		
 
 
-def compute_micro_metrics_from_confusion_matrix_v2(y_true, y_pred, class_names, eps=1e-7):
+def compute_micro_metrics_from_confusion_matrix(cm, eps=1e-7):
 	"""
 		Compute micro/global skill scores by first summing TP,FP,FN,TN across classes,
 		then applying the binary formulas once to those totals.
 	"""
-	
-	# - Compute multilabel confusion matrix
-	MCM = multilabel_confusion_matrix(
-		y_true,
-		y_pred,
-		sample_weight=None,
-		labels=class_names,
-		samplewise=False
-	)
-	
-	# - Compute TP/TN/FP/FN for each class
-	TN_c= np.array([int(MCM[i].ravel()[0]) for i in range(MCM.shape[0])])
-	FP_c= np.array([int(MCM[i].ravel()[1]) for i in range(MCM.shape[0])])
-	FN_c= np.array([int(MCM[i].ravel()[2]) for i in range(MCM.shape[0])])
-	TP_c= np.array([int(MCM[i].ravel()[3]) for i in range(MCM.shape[0])])
-	
+	cm = cm.astype(np.float64)
+	TP_c = np.diag(cm)
+	FP_c = cm.sum(axis=0) - TP_c
+	FN_c = cm.sum(axis=1) - TP_c
+	TN_c = cm.sum() - (TP_c + FP_c + FN_c)
+
 	# - Global totals (micro aggregation)
 	TP = TP_c.sum()
 	FP = FP_c.sum()
