@@ -121,6 +121,8 @@ class NumpyEncoder(json.JSONEncoder):
 			return float(obj)       
 		if isinstance(obj, np.ndarray):
 			return obj.tolist()
+		if isinstance(obj, set):
+			return list(obj)
 		return super().default(obj)
 		
 def summarize_metrics_per_class(scores, support):
