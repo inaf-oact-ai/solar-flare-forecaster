@@ -57,7 +57,7 @@ LABEL2ID= {
 	"X": 3
 }
 
-LABELS= {"NONE", "C", "M", "X"}
+LABELS= ["NONE", "C", "M", "X"]
 
 LABEL2ID_BINARY_CTHR= {
 	"NONE": 0,
@@ -66,7 +66,7 @@ LABEL2ID_BINARY_CTHR= {
 	"X": 1
 }
 
-LABELS_BINARY_CTHR= {"NONE", "C+"}
+LABELS_BINARY_CTHR= ["NONE", "C+"]
 
 LABEL2ID_BINARY_MTHR= {
 	"NONE": 0,
@@ -75,7 +75,7 @@ LABEL2ID_BINARY_MTHR= {
 	"X": 1
 }
 
-LABELS_BINARY_MTHR= {"NONE", "M+"}
+LABELS_BINARY_MTHR= ["NONE", "M+"]
 
 ID_REMAP= {
 	0: 0,
