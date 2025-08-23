@@ -399,6 +399,8 @@ def main():
 			print(f"ERROR: Invalid/unsupported flare_thr {args.flare_thr}!")
 			return 1
 		
+	label_names= list(label2id.keys())
+	
 	#===========================
 	#==   READ INPUTFILE
 	#===========================
@@ -428,7 +430,7 @@ def main():
 	#==   COMPUTE METRICS
 	#===========================
 	print("INFO: Computing metrics ...")
-	metrics= compute_single_label_metrics(y_true, y_pred)
+	metrics= compute_single_label_metrics(y_true, y_pred, label_names)
 		
 	print("--> metrics")
 	print(metrics)
