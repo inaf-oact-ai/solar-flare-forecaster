@@ -819,7 +819,7 @@ def main():
 	#   - Often alpha ~ class_weights (normalized); you can also pass a float.
 	if args.set_focal_alpha_to_mild_estimate:
 		logger.info("Setting focal alpha to mild estimate ...")
-		focal_alpha= dataset.compute_mild_focal_alpha_from_dataset(
+		focal_alpha, counts= dataset.compute_mild_focal_alpha_from_dataset(
     	num_classes=4 if args.sample_weight_from_flareid else num_labels,
     	id2target=id2target,
 			exponent=0.5,
@@ -828,13 +828,21 @@ def main():
 		)
 	else:
 		logger.info("Setting focal alpha to class_weights if not None ...")
+		counts= None
 		focal_alpha = class_weights if args.loss_type == "focal" else None	
+
+	def summarize_alpha(alpha_t, counts=None):
+		alpha = alpha_t.detach().cpu().numpy()
+		if counts:
+			print("Class counts :", counts.tolist())
+		print("Focal alpha  :", np.round(alpha, 4).tolist(), " (mean=", round(alpha.mean(), 4), ", median=", round(np.median(alpha), 4), ")")
 	
 	if args.loss_type=="focal":
 		print("--> FOCAL GAMMA")
 		print(focal_gamma)
 		print("--> FOCAL ALPHA")
 		print(focal_alpha)
+		summarize_alpha(focal_alpha, counts)
 		
 	# - Set trainer
 	if args.use_custom_trainer:

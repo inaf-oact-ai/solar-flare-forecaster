@@ -405,8 +405,7 @@ class BaseVisDataset(Dataset):
 		# - torch tensor
 		alpha_t = torch.tensor(alpha, dtype=dtype, device=device)
 		
-		#return alpha_t, counts
-		return alpha_t
+		return alpha_t, counts
 			
 	def __len__(self):
 		return len(self.datalist)
