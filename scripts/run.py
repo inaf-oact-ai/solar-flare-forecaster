@@ -839,7 +839,7 @@ def main():
 	
 	if args.loss_type=="focal":
 		print("--> FOCAL GAMMA")
-		print(focal_gamma)
+		print(args.focal_gamma)
 		print("--> FOCAL ALPHA")
 		print(focal_alpha)
 		summarize_alpha(focal_alpha, counts)
