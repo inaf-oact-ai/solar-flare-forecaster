@@ -209,10 +209,11 @@ class ScoreOrientedLoss(nn.Module):
 		# Fp = p
 		Fp = self._apply_distribution(p, j=j).clamp(0.0, 1.0)
 		
-		TP = torch.sum(y * Fp)
 		TN = torch.sum((1.0 - y) * (1.0 - Fp))
+		TP = torch.sum(y * Fp)
 		FP = torch.sum((1.0 - y) * Fp)
 		FN = torch.sum(y * (1.0 - Fp))
+		
 		return TN, FP, FN, TP
 
 	def _compute_score_from_confusion(self, TN, FP, FN, TP, which):
@@ -225,6 +226,7 @@ class ScoreOrientedLoss(nn.Module):
 			# recall + specificity - 1
 			#rec = TP / torch.nan_to_num(TP + FN, nan=0.0)      # TP / (TP+FN)
 			#spe = TN / torch.nan_to_num(TN + FP, nan=0.0)      # TN / (TN+FP)
+			
 			rec_den = TP + FN
 			spe_den = TN + FP
 			rec = torch.where(rec_den > 0, TP / (rec_den + eps), torch.zeros_like(TP))
@@ -293,9 +295,20 @@ class ScoreOrientedLoss(nn.Module):
 		# multiclass one-vs-rest on softmax probabilities
 		probs = torch.softmax(logits, dim=-1)                # (B,C)
 		y_idx = labels.view(-1).long()                       # (B,)
+		
+		print("probs")
+		print(probs)
+		print(probs.shape)
+		print("y_idx")
+		print(y_idx)
+		print(y_idx.shape)
     
 		# build one-hot without breaking grad path
 		y_onehot = torch.zeros_like(probs).scatter_(1, y_idx.unsqueeze(1), 1.0)  # (B,C)
+		
+		print("y_onehot")
+		print(y_onehot)
+		print(y_onehot.shape)
 
 		per_class_scores = []
 		per_class_weights = []  # for 'weighted' mode: weight by #negatives like the TF ref
@@ -303,9 +316,27 @@ class ScoreOrientedLoss(nn.Module):
 		for j in range(C):
 			p_j = probs[:, j]               # (B,)
 			y_j = y_onehot[:, j]            # (B,)
+			print(f"p_{j}")
+			print(p_j)
+			print(p_j.shape)
+			print(f"y_{j}")
+			print(y_j)
+			print(y_j.shape)
+			
 			TN, FP, FN, TP = self._expected_confusion(y_j, p_j, j=j)
 			s_j = self._compute_score_from_confusion(TN, FP, FN, TP, which=self.score_fn)
 			per_class_scores.append(s_j)
+			
+			print("TN")
+			print(TN)
+			print("FP")
+			print(FP)
+			print("FN")
+			print(FN)
+			print("TP")
+			print(TP)
+			print(f"s_{j}")
+			print(s_j)
 
 			# weight by #negatives in batch (like original SOL 'weighted' option)
 			n_neg = torch.clamp((y_j.shape[0] - y_j.sum()), min=1.0)
@@ -317,6 +348,9 @@ class ScoreOrientedLoss(nn.Module):
 			score = (scores * w).sum() / w.sum()
 		else:
 			score = scores.mean()
+			
+		print("score")
+		print(score)
 			
 		return score
 
@@ -330,14 +364,14 @@ class ScoreOrientedLoss(nn.Module):
 		else:
 			score= self._compute_multiclass_score(logits, labels)
 			
-		print("score")
-		print(score)
-					
 		# - Compute final loss
 		if self.add_constant: # TSS=[-1,1] --> LOSS=-TSS=[-1,1] --> LOSS=[0,2] 
 			loss_sol= -score + 1.0
 		else:
 			loss_sol= -score
+			
+		print("loss_sol")
+		print(loss_sol)
 
 		return loss_sol
 		
