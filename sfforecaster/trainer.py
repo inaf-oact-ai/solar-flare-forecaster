@@ -246,7 +246,7 @@ class ScoreOrientedLoss(nn.Module):
 				delta = float(self.delta)
 			return _F_cosine(p, mu, delta)
 
-	@torch.no_grad()
+	#@torch.no_grad()
 	def _confusion_expected(self, y_true_bin: torch.Tensor, Fp: torch.Tensor):
 		"""
 			Expected confusion for a binary task given:
