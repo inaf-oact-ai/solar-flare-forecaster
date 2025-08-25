@@ -9,6 +9,7 @@ from __future__ import print_function
 import sys
 import os
 import random
+import math
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple, Union
 
 # - TORCH
@@ -116,6 +117,220 @@ class FocalLossMultiLabel(nn.Module):
 
 
 ##########################################
+##    SOLAR LOSSES
+##########################################
+def _acc(TN, FP, FN, TP):  # not used by default, but kept for completeness
+	denom = TN + FP + FN + TP
+	return torch.nan_to_num((TP + TN) / denom, nan=0.0)
+
+def _prec(TN, FP, FN, TP):
+	denom = FP + TP
+	return torch.nan_to_num(TP / denom, nan=0.0)
+
+def _rec(TN, FP, FN, TP):
+	denom = FN + TP
+	return torch.nan_to_num(TP / denom, nan=0.0)
+
+def _spec(TN, FP, FN, TP):
+	denom = FP + TN
+	return torch.nan_to_num(TN / denom, nan=0.0)
+
+def _f1(TN, FP, FN, TP):
+	p = _prec(TN, FP, FN, TP)
+	r = _rec(TN, FP, FN, TP)
+	denom = p + r
+	return torch.nan_to_num(2.0 * (p * r) / denom, nan=0.0)
+
+def _tss(TN, FP, FN, TP):
+	# TSS = TPR + TNR − 1 = recall + specificity − 1
+	return _rec(TN, FP, FN, TP) + _spec(TN, FP, FN, TP) - 1.0
+
+def _csi(TN, FP, FN, TP):
+	denom = FN + FP + TP
+	return torch.nan_to_num(TP / denom, nan=0.0)
+
+def _hss1(TN, FP, FN, TP):
+	denom = FN + TP
+	return torch.nan_to_num((TP - FP) / denom, nan=0.0)
+
+def _hss2(TN, FP, FN, TP):
+	# 2*(TP*TN - FP*FN) / ((TP+FN)*(FN+TN) + (TP+FP)*(TN+FP))
+	num = 2.0 * (TP * TN - FP * FN)
+	denom = (TP + FN) * (FN + TN) + (TP + FP) * (TN + FP)
+	return torch.nan_to_num(num / denom, nan=0.0)
+
+_SCORE_MAP = {
+	"accuracy": _acc,
+	"precision": _prec,
+	"recall": _rec,
+	"specificity": _spec,
+	"f1_score": _f1,
+	"tss": _tss,
+	"csi": _csi,
+	"hss1": _hss1,
+	"hss2": _hss2,
+}
+
+def _F_uniform(p: torch.Tensor) -> torch.Tensor:
+	# uniform prior over threshold ⇒ F(p) = p
+	return p
+
+def _F_cosine(p: torch.Tensor, mu: float, delta: float) -> torch.Tensor:
+	# Raised cosine CDF as in the TF code
+	# piecewise: 0 for p < mu-delta; 1 for p > mu+delta; smoothed in between
+	out = torch.zeros_like(p)
+	left = mu - delta
+	right = mu + delta
+
+	# middle region
+	mid_mask = (p >= left) & (p <= right)
+	out[p > right] = 1.0
+
+	# 0.5*(1 + (p-mu)/delta + 1/pi * sin(pi*(p-mu)/delta))
+	pm = (p[mid_mask] - mu) / delta
+	out[mid_mask] = 0.5 * (1.0 + pm + (1.0 / math.pi) * torch.sin(math.pi * pm))
+	return out.clamp(0.0, 1.0)
+	
+	
+class ScoreOrientedLoss(nn.Module):
+	"""
+		PyTorch implementation of SOL (Guastavino & Marchetti 2021).
+		Defaults to uniform prior + score='tss' ⇒ loss ≈ -TSS (optionally + constant).
+
+		Args:
+			- score: one of ['accuracy','precision','recall','specificity','f1_score','tss','csi','hss1','hss2']
+			- distribution: 'uniform' or 'cosine'
+			- mu, delta: float or list[float] (used only for 'cosine'); length K if multiclass with class-wise params
+			- mode: 'average' or 'weighted' (aggregation across one-vs-rest tasks in multiclass)
+			- from_logits: if True, apply sigmoid (binary) or softmax (multiclass)
+			- add_constant: if True, return `-score + 1`; if False, return `-score`
+		Usage:
+			# binary: y_true (B,), y_pred (B,) or (B,1)
+			# multiclass: y_true (B,) int64 labels; y_pred (B,K)
+	"""
+
+	def __init__(
+		self,
+		score: str = "tss",
+		distribution: str = "uniform",
+		mu: Union[float, List[float]] = 0.5,
+		delta: Union[float, List[float]] = 0.1,
+		mode: str = "average",
+		from_logits: bool = True,
+		add_constant: bool = False,
+	):
+		super().__init__()
+		assert score in _SCORE_MAP, f"Unknown score: {score}"
+		assert distribution in ("uniform", "cosine")
+		assert mode in ("average", "weighted")
+		self.score_fn = _SCORE_MAP[score]
+		self.distribution = distribution
+		self.mu = mu
+		self.delta = delta
+		self.mode = mode
+		self.from_logits = from_logits
+		self.add_constant = add_constant
+
+	def _apply_distribution(self, p: torch.Tensor, j: Optional[int] = None) -> torch.Tensor:
+		if self.distribution == "uniform":
+			return _F_uniform(p)
+		else:
+			# cosine; allow per-class mu/delta if list provided
+			if isinstance(self.mu, list) or isinstance(self.mu, tuple):
+				mu = float(self.mu[j])
+			else:
+				mu = float(self.mu)
+			if isinstance(self.delta, list) or isinstance(self.delta, tuple):
+				delta = float(self.delta[j])
+			else:
+				delta = float(self.delta)
+			return _F_cosine(p, mu, delta)
+
+	@torch.no_grad()
+	def _confusion_expected(self, y_true_bin: torch.Tensor, Fp: torch.Tensor):
+		"""
+			Expected confusion for a binary task given:
+			- y_true_bin: (B,) in {0,1}
+			- Fp: (B,) in [0,1]  (prior-CDF evaluated at predicted prob)
+			Returns TN, FP, FN, TP as scalars (tensors).
+		"""
+		y = y_true_bin.float()
+		one_minus_y = 1.0 - y
+		one_minus_Fp = 1.0 - Fp
+
+		TN = torch.sum(one_minus_y * one_minus_Fp)
+		TP = torch.sum(y * Fp)
+		FP = torch.sum(one_minus_y * Fp)
+		FN = torch.sum(y * one_minus_Fp)
+		return TN, FP, FN, TP
+
+	def forward(self, y_pred: torch.Tensor, y_true: torch.Tensor) -> torch.Tensor:
+		"""
+			y_pred:
+				- binary: shape (B,) or (B,1)
+				- multiclass: shape (B,K)
+			y_true:
+				- binary: (B,) in {0,1}
+				- multiclass: (B,) int64 class indices
+		"""
+		if y_pred.dim() == 1 or y_pred.size(-1) == 1:
+			# --- Binary case ---
+			y_pred = y_pred.view(-1)
+			if self.from_logits:
+				p = torch.sigmoid(y_pred)
+			else:
+				p = y_pred.clamp(0.0, 1.0)
+			y = y_true.view(-1).float()
+
+			Fp = self._apply_distribution(p)  # uniform ⇒ F(p)=p
+			TN, FP, FN, TP = self._confusion_expected(y, Fp)
+			score = self.score_fn(TN, FP, FN, TP)
+			loss = -score
+			if self.add_constant: # TSS=[-1,1] --> LOSS=-TSS=[-1,1] --> LOSS=[0,2] 
+				loss = loss + 1.0
+			return loss
+
+		else:
+			# --- Multiclass one-vs-rest ---
+			B, K = y_pred.shape
+			if self.from_logits:
+				p = F.softmax(y_pred, dim=-1)  # (B,K)
+			else:
+				p = y_pred.clamp(0.0, 1.0)
+				p = p / (p.sum(dim=-1, keepdim=True) + 1e-12)
+
+			# y_true as one-hot (B,K), float
+			if y_true.dtype != torch.long:
+				y_true = y_true.long()
+			y_oh = F.one_hot(y_true, num_classes=K).float()  # (B,K)
+
+			scores = []
+			weights = []  # for 'weighted' mode: #negatives per class
+			for j in range(K):
+				yj = y_oh[:, j]              # (B,)
+				pj = p[:, j]                 # (B,)
+				Fpj = self._apply_distribution(pj, j=j)
+				TN, FP, FN, TP = self._confusion_expected(yj, Fpj)
+				sj = self.score_fn(TN, FP, FN, TP)
+				scores.append(sj)
+				if self.mode == "weighted":
+					# weight by #negatives to mimic TF code
+					wj = float(B) - torch.sum(yj)
+					weights.append(wj)
+
+			scores = torch.stack(scores)  # (K,)
+			if self.mode == "weighted":
+				weights = torch.stack(weights) + 1e-12
+				final_score = torch.sum(scores * weights) / torch.sum(weights)
+			else:
+				final_score = torch.mean(scores)
+
+			loss = -final_score
+			if self.add_constant:
+				loss = loss + 1.0
+			return loss	
+
+##########################################
 ##    WEIGHTED-LOSS CUSTOM TRAINER
 ##########################################
 class AdvancedImbalanceTrainer(Trainer):
@@ -130,6 +345,10 @@ class AdvancedImbalanceTrainer(Trainer):
 		focal_gamma=2.0,
 		focal_alpha=None,            # None | float | tensor[C] (multiclass)
 		sample_weights=None,         # list[float] per-example for train set or None
+		sol_score="tss", 
+		sol_distribution="uniform", 
+		sol_mode="average",
+		sol_add_constant=False,
 		**kwargs
 	):
 		super().__init__(*args, **kwargs)
@@ -139,24 +358,48 @@ class AdvancedImbalanceTrainer(Trainer):
 		self.focal_gamma = focal_gamma
 		self.focal_alpha = focal_alpha
 		self.sample_weights = sample_weights
+		self.sol_score= sol_score
+		self.sol_distribution= sol_distribution
+		self.sol_mode= sol_mode
+		self.sol_add_constant= sol_add_constant
 
-		# - Build the criterion
+		# - Build the loss criterion
 		if self.multilabel:
-			if self.loss_type == "focal":
-				pos_w = self.class_weights.to(self.model.device) if self.class_weights is not None else None
-				self.loss_fct = FocalLossMultiLabel(gamma=self.focal_gamma, pos_weight=pos_w, reduction="mean")
-			else:
+			if self.loss_type == "ce":
 				pos_w = self.class_weights.to(self.model.device) if self.class_weights is not None else None
 				self.loss_fct = torch.nn.BCEWithLogitsLoss(pos_weight=pos_w)
+				
+			elif self.loss_type == "focal":
+				pos_w = self.class_weights.to(self.model.device) if self.class_weights is not None else None
+				self.loss_fct = FocalLossMultiLabel(gamma=self.focal_gamma, pos_weight=pos_w, reduction="mean")
+			
+			else:
+				raise ValueError(f"Unknown/unsupported loss_type for multilabel classification: {self.loss_type}")
+				
 		else:
-			if self.loss_type == "focal":
+			if self.loss_type == "ce":
+				w = self.class_weights.to(self.model.device) if self.class_weights is not None else None
+				self.loss_fct = torch.nn.CrossEntropyLoss(weight=w)
+		
+			elif self.loss_type == "focal":
 				alpha = self.focal_alpha
 				if isinstance(alpha, torch.Tensor):
 					alpha = alpha.to(self.model.device)
 				self.loss_fct = FocalLossMultiClass(alpha=alpha, gamma=self.focal_gamma, reduction="mean")
+				
+			elif self.loss_type == "sol":
+				# Note: from_logits=True; multiclass handled automatically
+				self.loss_fct = ScoreOrientedLoss(
+					score=self.sol_score,
+					distribution=self.sol_distribution,
+					mu=0.5, delta=0.1,       # ignored for uniform
+					mode=self.sol_mode,
+					from_logits=True,
+					add_constant=self.sol_add_constant,  # usually False (pure -TSS)
+				)
+            
 			else:
-				w = self.class_weights.to(self.model.device) if self.class_weights is not None else None
-				self.loss_fct = torch.nn.CrossEntropyLoss(weight=w)
+				raise ValueError(f"Unknown loss_type: {self.loss_type}")
 
 	def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
 		""" Override trainer compute_loss function """
@@ -172,6 +415,9 @@ class AdvancedImbalanceTrainer(Trainer):
 			labels = labels.float()
 			loss = self.loss_fct(logits, labels)
 		else:
+			## SOL expects:
+			#  - binary: logits shape (B,) or (B,1), labels (B,)
+			#  - multiclass: logits (B,K), labels (B,)
 			loss = self.loss_fct(logits, labels)
 
 		return (loss, outputs) if return_outputs else loss
