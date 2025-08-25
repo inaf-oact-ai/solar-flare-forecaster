@@ -219,24 +219,43 @@ class ScoreOrientedLoss(nn.Module):
 		""" Compute score from confusion values """
 		# all tensors (scalar) with grad
 		eps = 1e-12
+		which = which.lower()
     
 		if which == 'tss':
 			# recall + specificity - 1
-			rec = TP / torch.nan_to_num(TP + FN, nan=0.0)      # TP / (TP+FN)
-			spe = TN / torch.nan_to_num(TN + FP, nan=0.0)      # TN / (TN+FP)
+			#rec = TP / torch.nan_to_num(TP + FN, nan=0.0)      # TP / (TP+FN)
+			#spe = TN / torch.nan_to_num(TN + FP, nan=0.0)      # TN / (TN+FP)
+			rec_den = TP + FN
+			spe_den = TN + FP
+			rec = torch.where(rec_den > 0, TP / (rec_den + eps), torch.zeros_like(TP))
+			spe = torch.where(spe_den > 0, TN / (spe_den + eps), torch.zeros_like(TN))
 			return rec + spe - 1.0
+			
 		elif which == 'accuracy':
-			return (TP + TN) / torch.nan_to_num(TP + TN + FP + FN, nan=0.0)
+			#return (TP + TN) / torch.nan_to_num(TP + TN + FP + FN, nan=0.0)
+			den = TP + TN + FP + FN
+			return torch.where(den > 0, (TP + TN) / (den + eps), torch.zeros_like(den))
+
 		elif which == 'precision':
-			return TP / torch.nan_to_num(TP + FP, nan=0.0)
+			#return TP / torch.nan_to_num(TP + FP, nan=0.0)
+			den = TP + FP
+			return torch.where(den > 0, TP / (den + eps), torch.zeros_like(den))
+
 		elif which == 'recall':
-			return TP / torch.nan_to_num(TP + FN, nan=0.0)
+			#return TP / torch.nan_to_num(TP + FN, nan=0.0)
+			den = TP + FN
+			return torch.where(den > 0, TP / (den + eps), torch.zeros_like(den))
+			
 		elif which == 'specificity':
-			return TN / torch.nan_to_num(TN + FP, nan=0.0)
+			#return TN / torch.nan_to_num(TN + FP, nan=0.0)
+			den = TN + FP
+			return torch.where(den > 0, TN / (den + eps), torch.zeros_like(den))
+			
 		elif which == 'f1':
 			prec = TP / torch.nan_to_num(TP + FP, nan=0.0)
 			rec  = TP / torch.nan_to_num(TP + FN, nan=0.0)
 			return 2 * (prec * rec) / torch.nan_to_num(prec + rec, nan=0.0)
+			
 		elif which == 'csi':
 			return TP / torch.nan_to_num(TP + FP + FN, nan=0.0)
 		elif which == 'hss1':
