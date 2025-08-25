@@ -148,7 +148,7 @@ class ScoreOrientedLoss(nn.Module):
 	):
 		super().__init__()
 		
-		_VALID_SCORE_FN= ["accuracy", "precision", "recall", "specificity", "f1_score", "tss", "csi", "hss1", "hss2"]
+		_VALID_SCORE_FN= ["accuracy", "precision", "recall", "specificity", "f1", "tss", "csi", "hss1", "hss2"]
 		
 		assert score_fn in _VALID_SCORE_FN, f"Unknown score: {score_fn}"
 		assert distribution in ("uniform", "cosine")
@@ -198,7 +198,7 @@ class ScoreOrientedLoss(nn.Module):
 				delta = float(self.delta)
 			return self._F_cosine(p, mu, delta)
 
-	def _expected_confusion(self, y_true, p):
+	def _expected_confusion(self, y_true, p, j: Optional[int] = None):
 		"""
 			y_true: (B,) in {0,1}  float or long
 			p     : (B,) in [0,1]  probability for positive class
@@ -206,7 +206,9 @@ class ScoreOrientedLoss(nn.Module):
 		"""
 		y = y_true.float()
 		# F_unif(p) = p
-		Fp = p
+		# Fp = p
+		Fp = self._apply_distribution(p, j=j).clamp(0.0, 1.0)
+		
 		TP = torch.sum(y * Fp)
 		TN = torch.sum((1.0 - y) * (1.0 - Fp))
 		FP = torch.sum((1.0 - y) * Fp)
@@ -251,15 +253,15 @@ class ScoreOrientedLoss(nn.Module):
 		""" Compute binary class loss """
 
 		# binary: logits (B,1) or (B,)
-		if logits.ndim == 2:
+		if logits.ndim == 2 and logits.shape[-1] == 1:
 			logits_bin = logits.squeeze(-1)
-    else:
+		else:
 			logits_bin = logits
-		
+			
 		prob_pos = torch.sigmoid(logits_bin)                 # (B,)
 		y_bin    = labels.float().view(-1)                   # (B,)
-		TN, FP, FN, TP = self._expected_confusion(y_bin, prob_pos)
-		score = self._compute_score_from_confusion(TN, FP, FN, TP, which=self.score_fn.lower())
+		TN, FP, FN, TP = self._expected_confusion(y_bin, prob_pos, j=None)
+		score = self._compute_score_from_confusion(TN, FP, FN, TP, which=self.score_fn)
 		
 		return score
 		
@@ -282,8 +284,8 @@ class ScoreOrientedLoss(nn.Module):
 		for j in range(C):
 			p_j = probs[:, j]               # (B,)
 			y_j = y_onehot[:, j]            # (B,)
-			TN, FP, FN, TP = self._expected_confusion(y_j, p_j)
-			s_j = self._compute_score_from_confusion(TN, FP, FN, TP, which=self.score_fn.lower())
+			TN, FP, FN, TP = self._expected_confusion(y_j, p_j, j=j)
+			s_j = self._compute_score_from_confusion(TN, FP, FN, TP, which=self.score_fn)
 			per_class_scores.append(s_j)
 
 			# weight by #negatives in batch (like original SOL 'weighted' option)
