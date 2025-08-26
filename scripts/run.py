@@ -837,10 +837,15 @@ def main():
 		focal_alpha = class_weights if args.loss_type == "focal" else None	
 
 	def summarize_alpha(alpha_t, counts=None):
-		alpha = alpha_t.detach().cpu().numpy()
+		if alpha_t is None:
+			print("Focal alpha: None")
+		else:
+			alpha = alpha_t.detach().cpu().numpy()
+			print("Focal alpha  :", np.round(alpha, 4).tolist(), " (mean=", round(alpha.mean(), 4), ", median=", round(np.median(alpha), 4), ")")
+			
 		if counts is None:
 			print("Class counts :", counts.tolist())
-		print("Focal alpha  :", np.round(alpha, 4).tolist(), " (mean=", round(alpha.mean(), 4), ", median=", round(np.median(alpha), 4), ")")
+		
 	
 	if args.loss_type=="focal":
 		print("--> FOCAL GAMMA")
