@@ -843,7 +843,7 @@ def main():
 			alpha = alpha_t.detach().cpu().numpy()
 			print("Focal alpha  :", np.round(alpha, 4).tolist(), " (mean=", round(alpha.mean(), 4), ", median=", round(np.median(alpha), 4), ")")
 			
-		if counts is None:
+		if counts is not None:
 			print("Class counts :", counts.tolist())
 		
 	
