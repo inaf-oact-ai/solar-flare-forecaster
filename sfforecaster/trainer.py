@@ -433,9 +433,11 @@ class AdvancedImbalanceTrainer(Trainer):
 			#########################
 			##  ORDINAL
 			#########################
+			pos_w = self.ordinal_pos_weights.to(self.model.device) if self.ordinal_pos_weights is not None else None
+			
 			if self.loss_type == "ce":
 				# BCEWithLogitsLoss with per-threshold pos_weight
-				self.loss_fct = torch.nn.BCEWithLogitsLoss(pos_weight=self.ordinal_pos_weights)
+				self.loss_fct = torch.nn.BCEWithLogitsLoss(pos_weight=pos_w)
 			
 			elif self.loss_type == "focal":
 				## --> ADD IMPLEMENTATION HERE
