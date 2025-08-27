@@ -220,7 +220,7 @@ def load_ordinal_image_model(
 	)
 
 	# - Get input feature size from the existing classifier
-	if hasattr(model, "classifier") and isinstance(model.classifier, nn.Linear):
+	if hasattr(model, "classifier") and isinstance(model.classifier, torch.nn.Linear):
 		in_features = model.classifier.in_features
 		model.classifier = CoralOrdinalHead(in_features, num_classes=num_classes)
 	else:
