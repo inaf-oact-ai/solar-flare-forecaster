@@ -379,7 +379,11 @@ def load_transform(args, image_processor):
 	""" Load data transform """
 		
 	# - Retrieve image processor transform parameters
-	size = (image_processor.size["height"], image_processor.size["width"])
+	try:
+		size = (image_processor.size["height"], image_processor.size["width"])
+	except:
+		size= (image_processor.size["shortest_edge"], image_processor.size["shortest_edge"])  # VideoMAE does not have height & width inside size
+		
 	mean = image_processor.image_mean
 	std = image_processor.image_std
 	
