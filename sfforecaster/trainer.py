@@ -395,6 +395,8 @@ class AdvancedImbalanceTrainer(Trainer):
 		sol_distribution="uniform", 
 		sol_mode="average",
 		sol_add_constant=False,
+		ordinal=False,
+		ordinal_pos_weights=None
 		**kwargs
 	):
 		super().__init__(*args, **kwargs)
@@ -408,9 +410,14 @@ class AdvancedImbalanceTrainer(Trainer):
 		self.sol_distribution= sol_distribution
 		self.sol_mode= sol_mode
 		self.sol_add_constant= sol_add_constant
+		self.ordinal= ordinal
+		self.ordinal_pos_weights= ordinal_pos_weights
 
 		# - Build the loss criterion
 		if self.multilabel:
+			#########################
+			##  MULTI-LABEL
+			#########################
 			if self.loss_type == "ce":
 				pos_w = self.class_weights.to(self.model.device) if self.class_weights is not None else None
 				self.loss_fct = torch.nn.BCEWithLogitsLoss(pos_weight=pos_w)
@@ -421,8 +428,35 @@ class AdvancedImbalanceTrainer(Trainer):
 			
 			else:
 				raise ValueError(f"Unknown/unsupported loss_type for multilabel classification: {self.loss_type}")
+			
+		elif self.ordinal:
+			#########################
+			##  ORDINAL
+			#########################
+			if self.loss_type == "ce":
+				# BCEWithLogitsLoss with per-threshold pos_weight
+				self.loss_fct = torch.nn.BCEWithLogitsLoss(pos_weight=self.ordinal_pos_weights)
+			
+			elif self.loss_type == "focal":
+				## --> ADD IMPLEMENTATION HERE
+				#raise ValueError(f"loss_type {self.loss_type} not yet implemented")
+				# Multi-label focal loss variant, again with per-threshold pos_weight
+				self.loss_fct = FocalLossMultiLabel(
+					gamma=self.focal_gamma,
+					pos_weight=pos_w,
+					reduction="mean",
+				)
+			
+			elif self.loss_type == "sol":
+				raise ValueError(f"loss_type {self.loss_type} not supported for ordinal model")
 				
+			else:
+				raise ValueError(f"Unknown/unsupported loss_type for ordinal classification: {self.loss_type}")
+			
 		else:
+			#########################
+			##  SINGLE-LABEL
+			#########################
 			if self.loss_type == "ce":
 				w = self.class_weights.to(self.model.device) if self.class_weights is not None else None
 				self.loss_fct = torch.nn.CrossEntropyLoss(weight=w)
