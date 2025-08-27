@@ -628,6 +628,18 @@ class AdvancedImbalanceTrainer(Trainer):
 		#labels = inputs.pop("labels")
 		#outputs = model(**inputs)
 		logits = outputs.logits
+		
+		if torch.isnan(pixel_values).any() or torch.isinf(pixel_values).any():
+			print("⚠️ NaN values detected in batch pixel_values tensor!")
+			
+		if torch.isnan(labels).any() or torch.isinf(labels).any():
+			print("⚠️ NaN values detected in batch label tensor!")
+			
+		if torch.isnan(outputs).any() or torch.isinf(outputs).any():
+			print("⚠️ NaN values detected in model output tensor!")
+			
+		if torch.isnan(logits).any() or torch.isinf(logits).any():
+			print("⚠️ NaN values detected in logits tensor!")
 
 		if self.multilabel:
 			labels = labels.float()
