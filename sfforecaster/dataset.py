@@ -251,6 +251,21 @@ class BaseVisDataset(Dataset):
 		
 		return class_ids_hotenc
 		
+	def load_ordinal_target(self, idx):
+		""" Load ordinal target """
+			
+		# - Get flare id
+		flare_id= self.datalist[idx]['flare_id']
+
+		# - Get target depending on flare thresholds
+		geC = (flare_id >= 1)
+    geM = (flare_id >= 2)
+    geX = (flare_id >= 3)
+    thresholds= torch.from_numpy(np.array([geC, geM, geX]).astype(np.float32))
+    
+    return thresholds
+		
+		
 	def load_targets(self, idx, id2target):
 		""" Load single-class/single-out target """
 			
@@ -271,7 +286,6 @@ class BaseVisDataset(Dataset):
 		class_ids_hotenc= torch.from_numpy(np.array(class_ids_hotenc).astype(np.float32))
 		
 		return class_ids_hotenc
-		
 		
 	def load_image_info(self, idx):
 		""" Load image metadata """
@@ -299,6 +313,54 @@ class BaseVisDataset(Dataset):
 		w = w * (num_classes / w.sum())
 	
 		return torch.tensor(w, dtype=torch.float32)
+		
+	def compute_ordinal_pos_weight(self, num_classes, id2target, eps=1e-12, clip_max=None, device=None):
+		"""
+			Build per-threshold pos_weight for ordinal/cumulative tasks directly from dataset counts.
+
+			Classes are assumed ordered: 0 < 1 < ... < K-1 (e.g., 0=NONE, 1=C, 2=M, 3=X).
+			Ordinal heads are the K-1 tasks: [y>=1], [y>=2], ..., [y>=K-1].
+
+				pos_weight[k-1] = (# negatives for threshold k) / (# positives for threshold k)
+ 					= (sum_{c<k} n_c) / (sum_{c>=k} n_c)
+
+			Args:
+				- num_classes: K (e.g., 4 for NONE,C,M,X)
+				- id2target: your mapping used by self.load_target
+				- eps: small constant to avoid division by zero
+				- clip_max: optional float to cap very large ratios (helps stability on ultra-rare classes)
+				- device: optional torch device to place the tensor on
+
+			Returns:
+				- pos_weight: torch.FloatTensor of shape (K-1,), ordered for thresholds k=1..K-1
+				- counts:     np.ndarray of shape (K,) with raw class counts (for logging)
+		"""
+    
+    # - Gather counts as in compute_class_weights
+		ys = []
+		for i in range(len(self.datalist)):
+			y = self.load_target(i, id2target)
+			ys.append(int(y))
+    
+		counts = np.bincount(ys, minlength=num_classes).astype(float)
+
+		K = int(num_classes)
+		assert K >= 2, "Need at least 2 ordered classes for ordinal head"
+
+		total = counts.sum()
+
+		# cumulative sums from the right: cum_ge[k] = sum_{c>=k} n_c
+		cum_ge = np.cumsum(counts[::-1])[::-1]              # shape (K,)
+		n_pos = cum_ge[1:]                                   # (K-1,) positives at each threshold k=1..K-1
+		n_neg = total - n_pos                                # (K-1,) negatives are the rest
+
+		pos_weight = n_neg / np.maximum(n_pos, eps)          # (K-1,)
+
+		if clip_max is not None:
+			pos_weight = np.minimum(pos_weight, float(clip_max))
+
+		pw = torch.tensor(pos_weight, dtype=torch.float32, device=device)
+		return pw, counts
 		
 		
 	def compute_sample_weights(self, num_classes, id2target, scheme="balanced"):
@@ -490,6 +552,7 @@ class ImgDataset(BaseVisDataset):
 		id2target=None,
 		multiout=False,
 		multilabel=False,
+		ordinal=False,
 		verbose=False
 	):
 		super().__init__(
@@ -521,11 +584,12 @@ class ImgDataset(BaseVisDataset):
 				class_id= self.load_targets(idx, self.id2target)
 		else:
 			if self.multilabel:
-				class_id= self.load_hotenc_target(idx, self.id2target, self.mlb)
+				class_id_tensor= self.load_hotenc_target(idx, self.id2target, self.mlb)
+			elif self.ordinal:
+				class_id_tensor= self.load_ordinal_target(idx)
 			else:
 				class_id= self.load_target(idx, self.id2target)
-		
-		class_id_tensor= torch.tensor(class_id, dtype=torch.long)
+				class_id_tensor= torch.tensor(class_id, dtype=torch.long)
 		
 		return img_tensor, class_id_tensor
 		
