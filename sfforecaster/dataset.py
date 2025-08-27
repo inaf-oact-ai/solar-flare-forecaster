@@ -259,11 +259,11 @@ class BaseVisDataset(Dataset):
 
 		# - Get target depending on flare thresholds
 		geC = (flare_id >= 1)
-    geM = (flare_id >= 2)
-    geX = (flare_id >= 3)
-    thresholds= torch.from_numpy(np.array([geC, geM, geX]).astype(np.float32))
+		geM = (flare_id >= 2)
+		geX = (flare_id >= 3)
+		thresholds= torch.from_numpy(np.array([geC, geM, geX]).astype(np.float32))
     
-    return thresholds
+		return thresholds
 		
 		
 	def load_targets(self, idx, id2target):
