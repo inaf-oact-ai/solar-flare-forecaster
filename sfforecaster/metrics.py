@@ -19,6 +19,7 @@ from sklearn.metrics import classification_report
 from sklearn.metrics import confusion_matrix, multilabel_confusion_matrix
 from sklearn.metrics import hamming_loss
 from sklearn.metrics import matthews_corrcoef
+from sklearn.metrics import average_precision_score, cohen_kappa_score
 
 # - TORCH
 import torch
@@ -202,6 +203,61 @@ def compute_micro_metrics_from_confusion_matrix(cm, eps=1e-7):
 		"GSS": GSS,
 		"overall_accuracy": overall_acc
 	}
+	
+def coral_probs_from_logits(logits_t: torch.Tensor) -> torch.Tensor:
+	"""
+		Convert CORAL/cumulative logits (B, K-1) into K-class probabilities (B, K).
+		For K=4 (NONE<C<M<X), logits are [>=C, >=M, >=X].
+	"""
+	p_ge = torch.sigmoid(logits_t)              # (B, K-1)
+	if p_ge.shape[1] == 3:  # K=4 expected
+		p0 = 1.0 - p_ge[:, 0]                   # P(NONE)
+		p1 = p_ge[:, 0] - p_ge[:, 1]            # P(C)
+		p2 = p_ge[:, 1] - p_ge[:, 2]            # P(M)
+		p3 = p_ge[:, 2]                         # P(X)
+		probs = torch.stack([p0, p1, p2, p3], dim=1)
+	else:
+		# Generic K: probs[0]=1-p_ge[0], probs[k]=p_ge[k-1]-p_ge[k], probs[K-1]=p_ge[K-2]
+		B, Km1 = p_ge.shape
+		K = Km1 + 1
+		comps = []
+		comps.append(1.0 - p_ge[:, 0])
+		for k in range(1, Km1):
+			comps.append(p_ge[:, k-1] - p_ge[:, k])
+		comps.append(p_ge[:, Km1-1])
+		probs = torch.stack(comps, dim=1)
+    
+	# Numeric safety
+	probs = torch.clamp(probs, min=1e-12)
+	probs = probs / probs.sum(dim=1, keepdim=True)
+
+	return probs  # (B, K)
+
+
+def coral_decode_classes_from_logits(logits_t: torch.Tensor, thresholds=None) -> np.ndarray:
+	"""
+		Class indices from cumulative logits by counting passed thresholds.
+		Default threshold=0.0 on logits (i.e., sigmoid>=0.5).
+	"""
+	if thresholds is None:
+		ge = (logits_t >= 0.0).int()            # (B, K-1)
+	else:
+		thr = torch.as_tensor(thresholds, dtype=logits_t.dtype, device=logits_t.device)
+		ge = (torch.sigmoid(logits_t) >= thr.view(1, -1)).int()
+
+	return ge.sum(dim=1).detach().cpu().numpy()  # (B,)
+
+def monotonicity_violations(logits_t: torch.Tensor) -> dict:
+	"""
+		Check p_ge monotonicity: p_ge[:,0] >= p_ge[:,1] >= ... >= p_ge[:,-1].
+		Returns violation rate and mean positive violation magnitude.
+	"""
+	p = torch.sigmoid(logits_t)  # (B, K-1)
+	diffs = p[:, :-1] - p[:, 1:]  # should be >= 0
+	viol = (diffs < 0)
+	rate = viol.any(dim=1).float().mean().item()
+	mag = (-torch.minimum(diffs, torch.zeros_like(diffs))).mean().item()
+	return {"mvr": rate, "mvm": mag}  # rate, mean violation magnitude
 
 
 ###########################################
@@ -575,4 +631,125 @@ def build_single_label_metrics(target_names):
 		return metrics_scalar
 		
 	return compute_single_label_metrics
+
+
+##########################################
+##   ORDINAL METRICS
+##########################################
+def ordinal_metrics_from_logits(predictions, labels, target_names=None, thresholds=None):
+	"""
+		Evaluate an ordinal (CORAL/cumulative) model.
+			- predictions: np.ndarray or torch.Tensor, shape (B, K-1) logits for [>=class1 .. >=class_{K-1}]
+			- labels: (B,) ints in {0..K-1} OR (B, K-1) cumulative 0/1 labels
+			- returns: dict with your usual single-label metrics + ordinal extras
+	"""
+	# -- to torch
+	logits_t = torch.as_tensor(predictions)
+	B, Km1 = logits_t.shape
+	K = Km1 + 1
+
+	# -- normalize labels to class indices
+	if isinstance(labels, torch.Tensor):
+		lab = labels.detach().cpu().numpy()
+	else:
+		lab = np.asarray(labels)
+
+	if lab.ndim == 2 and lab.shape[1] == Km1:
+		# cumulative labels -> class index by counting ones
+		y_true = lab.sum(axis=1).astype(int)
+	else:
+		y_true = lab.astype(int)  # already indices
+
+	# -- build 4-class probabilities from CORAL (so we can reuse your single_label_metrics)
+	probs4 = coral_probs_from_logits(logits_t)         # (B, K)
+    
+	# Pass "log-probs" so your single_label_metrics softmax -> original probs
+	log_probs4 = torch.log(probs4)
+
+	# -- get your standard dict (accuracy, F1s, cm, TSS/HSS/GSS, etc.)
+	base = single_label_metrics(
+		predictions=log_probs4.detach().cpu().numpy(),  # shape (B, K)
+		labels=y_true,
+		target_names=target_names
+	)
+
+	# -- ordinal-specific extras
+	# decode classes directly (should match argmax of probs4)
+	y_pred = coral_decode_classes_from_logits(logits_t, thresholds=thresholds)
+
+	# Quadratic Weighted Kappa (ordinal agreement)
+	try:
+		qwk = cohen_kappa_score(y_true, y_pred, weights="quadratic")
+	except Exception:
+		qwk = np.nan
+
+	# per-threshold ROC-AUC / AP (treat each boundary as binary task)
+	p_ge = torch.sigmoid(logits_t).detach().cpu().numpy()  # (B, K-1)
+	aucs, aps = [], []
+	for k in range(1, K):  # thresholds 1..K-1
+		y_bin = (y_true >= k).astype(int)
+		try:
+			aucs.append(roc_auc_score(y_bin, p_ge[:, k-1]))
+		except Exception:
+			aucs.append(np.nan)
+        
+		try:
+			aps.append(average_precision_score(y_bin, p_ge[:, k-1]))
+		except Exception:
+			aps.append(np.nan)
+
+	mono = monotonicity_violations(logits_t)
+	base.update({
+		"qwk_quadratic": qwk,
+		"auc_thresholds": aucs,           # list length K-1
+		"ap_thresholds": aps,             # list length K-1
+		"monotonicity_violation_rate": mono["mvr"],
+		"monotonicity_violation_magnitude": mono["mvm"],
+	})
+
+	return base
+
+
+def build_ordinal_metrics(target_names=None, thresholds=None):
+	""" Returns a HF Trainer-compatible compute_metrics for ordinal models. """
+    
+	def compute_ordinal_metrics(p: EvalPrediction):
+		preds = p.predictions[0] if isinstance(p.predictions, tuple) else p.predictions  # (B, K-1)
+		nonlocal target_names, thresholds
+
+		full = ordinal_metrics_from_logits(
+			predictions=preds,
+			labels=p.label_ids,
+			target_names=target_names,
+			thresholds=thresholds
+		)
+
+		# Scalars that Trainer logs
+		metrics_scalar = {
+			"accuracy": full["accuracy"],
+			"precision": full["precision"],
+			"recall": full["recall"],
+			"f1score_weighted": full.get("f1score_weighted", full.get("f1score", np.nan)),
+			"f1score_micro": full.get("f1score_micro", np.nan),
+			"f1score_macro": full.get("f1score_macro", np.nan),
+			"mcc": full.get("mcc", np.nan),
+			"tss_micro": full.get("tss_micro", np.nan),
+			"hss_micro": full.get("hss_micro", np.nan),
+			"gss_micro": full.get("gss_micro", np.nan),
+			"qwk_quadratic": full["qwk_quadratic"],
+			"mvr": full["monotonicity_violation_rate"],
+			"mvm": full["monotonicity_violation_magnitude"],
+		}
+
+		# Add per-threshold AUC/AP with readable keys
+		aucs = full["auc_thresholds"]
+		aps  = full["ap_thresholds"]
+		for i, (auc, ap) in enumerate(zip(aucs, aps), start=1):
+			metrics_scalar[f"auc_ge_{i}"] = auc
+			metrics_scalar[f"ap_ge_{i}"]  = ap
+
+		return metrics_scalar
+
+	return compute_ordinal_metrics
+
 
