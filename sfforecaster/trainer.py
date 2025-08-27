@@ -637,6 +637,11 @@ class AdvancedImbalanceTrainer(Trainer):
 				
 		if torch.isnan(logits).any() or torch.isinf(logits).any():
 			print("⚠️ NaN values detected in logits tensor!")
+			
+		print("logits")
+		print(logits)
+		print("labels")
+		print(labels)
 
 		if self.multilabel:
 			labels = labels.float()
