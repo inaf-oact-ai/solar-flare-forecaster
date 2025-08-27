@@ -396,7 +396,7 @@ class AdvancedImbalanceTrainer(Trainer):
 		sol_mode="average",
 		sol_add_constant=False,
 		ordinal=False,
-		ordinal_pos_weights=None
+		ordinal_pos_weights=None,
 		**kwargs
 	):
 		super().__init__(*args, **kwargs)
