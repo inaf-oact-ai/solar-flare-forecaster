@@ -151,12 +151,12 @@ class VideoDataCollator:
 				do_resize=self.do_resize,    # set False if you already resized
 				do_normalize=self.do_normalize,  # set False if you already normalized
 			)
-			pixel_values = proc_out["pixel_values"]  # Shape: [B,T,C,H,W]
+			pixel_values = proc_out["pixel_values"].float()  # Shape: [B,T,C,H,W]
 			
 		else:
 			# - Convert 2D list to tensor of Shape: [B,T,C,H,W]
 			vids_tchw = [torch.stack(item, dim=0) for item in videos]
-			pixel_values = torch.stack(vids_tchw, dim=0)
+			pixel_values = torch.stack(vids_tchw, dim=0).float()
 
 		print("pixel_values")
 		print(pixel_values.shape)
