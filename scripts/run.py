@@ -400,7 +400,6 @@ def load_video_transform(args, image_processor):
 	print("do_normalize? ", (image_processor.do_normalize))
 	print("mean: ", (mean))
 	print("std: ", (std))
-	print("do_convert_rgb? ", (image_processor.do_convert_rgb))
 	
 	# - Define transforms
 	mean= [0.,0.,0.]
@@ -409,7 +408,7 @@ def load_video_transform(args, image_processor):
 	sigma_max= 3.0
 	ksize= 3.3 * sigma_max
 	kernel_size= int(max(ksize, 5)) # in imgaug kernel_size viene calcolato automaticamente dalla sigma così, ma forse si può semplificare a 3x3
-	blur_aug= T.GaussianBlur(kernel_size, sigma=(sigma_min, sigma_max))
+	#blur_aug= T.GaussianBlur(kernel_size, sigma=(sigma_min, sigma_max))
 
 	if args.videoloader:
 		transform_train= T.Compose([
@@ -514,7 +513,10 @@ def load_dataset(
 	#==   CREATE DATA TRANSFORMS
 	#====================================
 	# - Load data transforms
-	transform_train, transform_valtest= load_transform(args, image_processor)
+	if args.videoloader:
+		transform_train, transform_valtest= load_video_transform(args, image_processor)
+	else:
+		transform_train, transform_valtest= load_transform(args, image_processor)
 	
 	#====================================
 	#==   CREATE DATASET
