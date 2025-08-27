@@ -475,6 +475,7 @@ def load_dataset(
 		id2target=id2target,
 		multiout=args.multiout,
 		multilabel=args.multilabel,
+		ordinal=args.ordinal,
 		verbose=args.verbose
 	)
 		
