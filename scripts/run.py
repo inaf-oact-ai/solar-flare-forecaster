@@ -50,7 +50,7 @@ from sfforecaster.utils import *
 from sfforecaster.dataset import get_target_maps
 from sfforecaster.dataset import VideoDataset, ImgDataset, ImgStackDataset
 from sfforecaster.custom_transforms import FlippingTransform, Rotate90Transform
-from sfforecaster.metrics import build_multi_label_metrics, build_single_label_metrics
+from sfforecaster.metrics import build_multi_label_metrics, build_single_label_metrics, build_ordinal_label_metrics
 from sfforecaster.trainer import AdvancedImbalanceTrainer
 from sfforecaster.model import CoralOrdinalHead
 from sfforecaster import logger
