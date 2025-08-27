@@ -153,15 +153,17 @@ class VideoDataCollator:
 			)
 			pixel_values = proc_out["pixel_values"]  # Shape: [B,T,C,H,W]
 			
-		
 		else:
 			# - Convert 2D list to tensor of Shape: [B,T,C,H,W]
 			vids_tchw = [torch.stack(item, dim=0) for item in videos]
 			pixel_values = torch.stack(vids_tchw, dim=0)
 
+		print("pixel_values")
+		print(pixel_values.shape)
+
 		# - VideoMAE model require a Tensor of Shape: [B,C,T,H,W]
-		#pixel_values = pixel_values.permute(0, 2, 1, 3, 4)  # Tensor of Shape: [B,C,T,H,W]
-		pixel_values = self._to_bcthw(pixel_values)
+		###pixel_values = pixel_values.permute(0, 2, 1, 3, 4)  # Tensor of Shape: [B,C,T,H,W]
+		#pixel_values = self._to_bcthw(pixel_values)
 			
 		# - Set labels
 		labels= torch.stack(labels)
