@@ -50,6 +50,7 @@ from sfforecaster.utils import *
 from sfforecaster.dataset import get_target_maps
 from sfforecaster.dataset import VideoDataset, ImgDataset, ImgStackDataset
 from sfforecaster.custom_transforms import FlippingTransform, Rotate90Transform
+from sfforecaster.custom_transforms import VideoFlipping, VideoResize, VideoNormalize, VideoRotate90 
 from sfforecaster.metrics import build_multi_label_metrics, build_single_label_metrics, build_ordinal_metrics
 from sfforecaster.trainer import AdvancedImbalanceTrainer
 from sfforecaster.trainer import VideoDataCollator, ImgDataCollator
@@ -410,23 +411,37 @@ def load_video_transform(args, image_processor):
 	kernel_size= int(max(ksize, 5)) # in imgaug kernel_size viene calcolato automaticamente dalla sigma così, ma forse si può semplificare a 3x3
 	blur_aug= T.GaussianBlur(kernel_size, sigma=(sigma_min, sigma_max))
 
-	transform_train = T.Compose(
-		[
-			T.Resize(size, interpolation=T.InterpolationMode.BICUBIC),
-			FlippingTransform(),
-			Rotate90Transform(),
-			#T.ToTensor(),
-			T.Normalize(mean=mean, std=std),
-		]
-	)
+	if args.videoloader:
+		transform_train= T.Compose([
+			VideoResize(size, interpolation=T.InterpolationMode.BICUBIC),
+			VideoFlipping(),
+			VideoRotate90(),
+			VideoNormalize(mean=mean, std=std),
+		])
+		
+		transform= T.Compose([
+			VideoResize(size, interpolation=T.InterpolationMode.BICUBIC),
+			VideoNormalize(mean=mean, std=std),
+		])
 	
-	transform = T.Compose(
-		[
-			T.Resize(size, interpolation=T.InterpolationMode.BICUBIC),
-			#T.ToTensor(),
-			T.Normalize(mean=mean, std=std),
-		]
-	)
+	else:
+		transform_train = T.Compose(
+			[
+				T.Resize(size, interpolation=T.InterpolationMode.BICUBIC),
+				FlippingTransform(),
+				Rotate90Transform(),
+				#T.ToTensor(),
+				T.Normalize(mean=mean, std=std),
+			]
+		)
+	
+		transform = T.Compose(
+			[
+				T.Resize(size, interpolation=T.InterpolationMode.BICUBIC),
+				#T.ToTensor(),
+				T.Normalize(mean=mean, std=std),
+			]
+		)
 	
 	return transform_train, transform
 	
