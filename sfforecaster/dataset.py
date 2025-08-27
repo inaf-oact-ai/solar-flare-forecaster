@@ -569,6 +569,7 @@ class ImgDataset(BaseVisDataset):
 		self.mlb = MultiLabelBinarizer(classes=np.arange(0, self.nclasses))
 		self.multiout= multiout
 		self.multilabel= multilabel
+		self.ordinal= ordinal
 		
 	def __getitem__(self, idx):
 		""" Iterator providing training data (pixel_values + labels) """
