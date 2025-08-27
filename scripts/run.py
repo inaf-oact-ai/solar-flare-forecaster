@@ -74,6 +74,9 @@ def str2bool(v):
 	else:
 		raise argparse.ArgumentTypeError('Boolean value expected.')
 
+def list_of_floats(arg):
+	return list(map(float, arg.split(',')))
+
 ###########################
 ##     ARGS
 ###########################
@@ -156,6 +159,8 @@ def get_args():
 	parser.add_argument('-sol_distribution', '--sol_distribution', dest='sol_distribution', choices=["uniform", "cosine"], required=False, type=str, default='uniform', action='store', help='Solar score distribution used (default=uniform)')
 	parser.add_argument('-sol_mode', '--sol_mode', dest='sol_mode', choices=["weighted", "average"], required=False, type=str, default='average', action='store', help='Solar score averaging mode used (default=average)')
 	parser.add_argument("--sol_add_constant", dest='sol_add_constant', action="store_true", default=False, help="Add constant (+1) to solar loss (default=false).")
+		
+	parser.add_argument('-ordinal_thresholds', '--ordinal_thresholds', dest='ordinal_thresholds', required=False, type=list_of_floats, default=None, action='store', help='Sigmoid thresholds (e.g. [0.5,0.5,0.5]) for the K-1 flare classes. If None, 0.5 per class. (default=None)'))	
 		
 	# - Run options
 	parser.add_argument('-device', '--device', dest='device', required=False, type=str, default="cuda:0", action='store',help='Device identifier')
@@ -591,6 +596,49 @@ def run_test(
 ##############################
 ##     RUN PREDICT
 ##############################
+def coral_logits_to_class_probs(logits: torch.Tensor) -> torch.Tensor:
+	"""
+		Convert CORAL/cumulative logits (K-1,) or (1, K-1) to K-class probs (K,).
+		Works for any K >= 2. For K=4: logits = [>=C, >=M, >=X].
+	"""
+	if logits.dim() == 2:
+		logits = logits.squeeze(0)   # (K-1,)
+	Km1 = logits.shape[0]
+	K = Km1 + 1
+
+	p_ge = torch.sigmoid(logits)     # (K-1,)
+
+	# optional: enforce non-increasing p_ge to avoid tiny numerical violations
+	for i in range(1, Km1):
+		p_ge[i] = torch.minimum(p_ge[i], p_ge[i-1])
+
+	# K-class probabilities from cumulative probs
+	comps = [1.0 - p_ge[0]]                         # P(class 0)
+	for k in range(1, Km1):
+		comps.append(p_ge[k-1] - p_ge[k])           # P(class k)
+	comps.append(p_ge[Km1-1])                       # P(class K-1)
+
+	probs = torch.stack(comps)                      # (K,)
+	probs = torch.clamp(probs, min=1e-12)
+	probs = probs / probs.sum()
+	return probs  # (K,)
+
+def coral_decode_with_thresholds(logits: torch.Tensor, thresholds=None) -> int:
+	"""
+		Count thresholds passed: class = sum( sigmoid(logit_k) >= t_k ).
+		Defaults to t_k = 0.5 if thresholds is None.
+	"""
+	if logits.dim() == 2:
+		logits = logits.squeeze(0)
+	p_ge = torch.sigmoid(logits)
+	if thresholds is None:
+		ge = (p_ge >= 0.5).int()
+	else:
+		thr = torch.as_tensor(thresholds, dtype=logits.dtype, device=logits.device)
+		ge = (p_ge >= thr).int()
+	return int(ge.sum().item())
+
+
 def run_predict(
 	model,
 	dataset,
@@ -656,7 +704,29 @@ def run_predict(
 				print(predicted_labels)
 				print("--> predicted probs")
 				print(predicted_probs)
-					
+			
+		elif args.ordinal:
+			# --- Probabilistic decode (recommended) ---
+			probsK = coral_logits_to_class_probs(logits)         # (K,)
+			probs_np = probsK.cpu().numpy()
+			class_id = int(probsK.argmax().item())
+			predicted_label = id2label[class_id]                 # id2label must be the 4-class mapping
+			predicted_prob = float(probs_np[class_id])
+
+			# --- Optional: threshold-based ordinal decode (keeps ordinal semantics) ---
+			# thresholds = (0.5, 0.5, 0.5)  # example for K=4
+			# class_id_ord = coral_decode_with_thresholds(logits, thresholds=thresholds)
+			# predicted_label = id2label[class_id_ord]
+			# predicted_prob  = float(probs_np[class_id_ord])  # still report the class prob
+	
+			# - Fill prediction results in summary dict
+			image_info["label_pred"] = str(predicted_label)
+			image_info["prob_pred"]  = float(predicted_prob)
+			
+			# - Add extra info
+			image_info["probs_all"]  = probs_np.tolist()                  # K-class probabilities
+			image_info["ge_scores"]  = torch.sigmoid(logits.squeeze()).cpu().tolist()  # [>=C, >=M, >=X]
+		
 		else:
 			softmax = torch.nn.Softmax(dim=0)
 			probs = softmax(logits.squeeze().cpu()).numpy()
@@ -834,6 +904,8 @@ def main():
 	# - Set metrics
 	if args.multilabel:
 		compute_metrics_custom= build_multi_label_metrics(label_names)
+	elif args.ordinal:
+		compute_metrics_custom= build_ordinal_metrics(label_names, thresholds=args.ordinal_thresholds)
 	else:
 		compute_metrics_custom= build_single_label_metrics(label_names)
 		
