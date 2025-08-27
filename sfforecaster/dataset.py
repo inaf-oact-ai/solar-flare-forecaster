@@ -143,9 +143,25 @@ class BaseVisDataset(Dataset):
 		# - Load and concat image frames as List of T tensors of shape [C,H,W]
 		frames = [self.load_tensor(p) for p in image_paths]
 		
+		def has_bad_frames(frame_list):
+			bad_frames= False	
+			for t in frame_list:
+				if t is None or t.numel()==0:
+					bad_frames= True
+					break
+			return bad_frames
+		
+		if has_bad_frames(frames):
+			logger.warning("Input frame list has one or more None/empty tensors, returning None!")
+			return None
+		
 		# - Apply transform (should work on list [C,H,W] or tensor [T,C,H,W])
 		if self.transform:
 			frames= self.transform(frames)
+			
+			if has_bad_frames(frames):
+				logger.warning("Input frame list after transform has one or more None/empty tensors, returning None!")
+				return None
 		
 		# - Create video tensor
 		#video= torch.stack(frames)  # Shape: [T, C, H, W]
