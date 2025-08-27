@@ -634,10 +634,7 @@ class AdvancedImbalanceTrainer(Trainer):
 			
 		if torch.isnan(labels).any() or torch.isinf(labels).any():
 			print("⚠️ NaN values detected in batch label tensor!")
-			
-		if torch.isnan(outputs).any() or torch.isinf(outputs).any():
-			print("⚠️ NaN values detected in model output tensor!")
-			
+				
 		if torch.isnan(logits).any() or torch.isinf(logits).any():
 			print("⚠️ NaN values detected in logits tensor!")
 
