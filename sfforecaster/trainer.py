@@ -170,10 +170,10 @@ class VideoDataCollator:
 		
 		# - Check if any NaN in pixel_values
 		if torch.isnan(pixel_values).any():
-			logger.warning("⚠️ NaN values detected in batch tensor!")
+			print("⚠️ NaN values detected in batch tensor!")
 
 		if torch.isinf(pixel_values).any():
-			logger.warning("⚠️ Inf values detected in batch tensor!")
+			print("⚠️ Inf values detected in batch tensor!")
 		
 		return {"pixel_values": pixel_values, "labels": labels}	
 		
