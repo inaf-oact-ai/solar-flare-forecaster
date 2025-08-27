@@ -141,14 +141,27 @@ class BaseVisDataset(Dataset):
 			return None	
 		
 		# - Load and concat image frames
+		#   NB: VideoMAE processor requires a list of images like the below frame
+		#       inputs= image_processor(frames, return_tensors='pt') ==> inputs["pixel_values"].shape is [T, C, H, W]
 		frames = [self.load_tensor(p) for p in image_paths]
+		
+		# - Create video tensor
 		video= torch.stack(frames)  # Shape: [T, C, H, W]
 		
-		# - Apply transforms
-		if self.transform:
-			video= self.transform(video)
+		# - Change tensor shape as PyTorchVideo transform API requires inputs with shape: [C, T, H, W]
+		video_cthw= video.permute(1, 0, 2, 3)  # Shape: [C, T, H, W]
 		
-		return video
+		# - Apply transforms
+		#   NB: PyTorchVideo transform API requires inputs with shape: [C, T, H, W]
+		if self.transform:
+			video_cthw= self.transform(video_cthw)
+			
+		# - Convert back to Shape: [T, C, H, W]
+		frames_transformed = list(video_cthw.permute(1, 0, 2, 3).unbind(dim=0))
+		video_transformed= torch.stack(frames_transformed)
+		
+		return frames_transformed
+		#return video_transformed
 		
 	def load_image_stack(self, idx):
 		""" Load multi-channel image as PyTorch tensor with transforms applied """

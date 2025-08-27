@@ -42,6 +42,133 @@ import evaluate
 from sfforecaster.utils import *
 from sfforecaster import logger
 
+
+##########################################
+##    DATA COLLATORS
+##########################################
+class ImgDataCollator:
+	def __init__(self, image_processor=None, do_resize=True, do_normalize=True):
+		self.processor = image_processor
+		self.do_resize = do_resize
+		self.do_normalize = do_normalize
+	
+	def __call__(self, batch):
+		
+		# - Collect batch items
+		images, labels = [], []
+		
+		for item in batch:
+			if isinstance(item, dict):
+				img = item.get("pixel_values", item.get("image"))
+				lab = item.get("labels", item.get("label"))
+			else:  # tuple/list
+				if not item or item[0] is None:
+					continue
+				img, lab = item[0], item[1]
+
+			if img is None:
+				continue
+			
+			images.append(img)
+			labels.append(lab)
+	
+		if len(images) == 0:
+			# Edge case: all items were None — return empty batch tensors
+			return {
+				"pixel_values": torch.empty(0),
+				"labels": torch.empty(0, dtype=torch.long)
+			}
+	
+		# - Set pixel values ---
+		if self.processor is not None:
+			# - Pass the raw list to the processor (PIL / np / torch supported)
+			proc_out = self.processor(
+				images,
+				return_tensors="pt",
+				do_resize=self.do_resize,       # set False if already resized
+				do_normalize=self.do_normalize, # set False if already normalized
+			)
+			pixel_values = proc_out["pixel_values"]
+			
+		else:
+			# Assume items are already tensors; ensure [B, C, H, W]
+			images = [img if isinstance(img, torch.Tensor) else torch.as_tensor(img) for img in images] 
+			pixel_values = torch.stack(images, dim=0)
+	
+		# - Set labels
+		labels= torch.stack(labels)
+	
+		return {"pixel_values": pixel_values, "labels": labels}	
+		
+
+class VideoDataCollator:
+	def __init__(self, image_processor=None, do_resize=True, do_normalize=True):
+		self.processor = image_processor
+		self.do_resize = do_resize
+		self.do_normalize = do_normalize
+
+
+	@staticmethod
+	def _to_bcthw(x: torch.Tensor) -> torch.Tensor:
+		""" Ensure x is [B, C, T, H, W]. Accepts [B, C, T, H, W] or [B, T, C, H, W]."""
+		if x.ndim != 5:
+			raise ValueError(f"pixel_values must be 5D, got shape {tuple(x.shape)}")
+		B, D1, D2, H, W = x.shape
+		# Heuristic: channels is almost always 1 or 3
+		if D1 in (1, 3):           # [B, C, T, H, W]
+			return x
+		if D2 in (1, 3):           # [B, T, C, H, W] -> [B, C, T, H, W]
+			return x.permute(0, 2, 1, 3, 4)
+		# Fallback: assume already [B, C, T, H, W]
+		return x
+
+	def __call__(self, batch):
+	
+		# - Collect batch items
+		videos, labels = [], []
+		
+		for item in batch:
+			# - item[0] is a list of T tensor of Shape: [C,H,W])
+			if not item or item[0] is None:
+				continue
+			frames, lab = item[0], item[1]
+
+			if frames is None:
+				continue
+			
+			videos.append(frames)
+			labels.append(lab)
+			
+		if len(videos) == 0:
+			raise ValueError("Empty batch after filtering invalid items.")	
+			
+		# - Set pixel values ---
+		if self.processor is not None:
+			# - NB: This works only with list of list of [C,H,W]
+			proc_out = self.processor(
+				videos,                      # list of length B; each item is list of T HWC frames
+				return_tensors="pt",
+				do_resize=self.do_resize,    # set False if you already resized
+				do_normalize=self.do_normalize,  # set False if you already normalized
+			)
+			pixel_values = proc_out["pixel_values"]  # Shape: [B,T,C,H,W]
+			
+		
+		else:
+			# - Convert 2D list to tensor of Shape: [B,T,C,H,W]
+			vids_tchw = [torch.stack(item, dim=0) for item in videos]
+			pixel_values = torch.stack(vids_tchw, dim=0)
+
+		# - VideoMAE model require a Tensor of Shape: [B,C,T,H,W]
+		#pixel_values = pixel_values.permute(0, 2, 1, 3, 4)  # Tensor of Shape: [B,C,T,H,W]
+		pixel_values = self._to_bcthw(pixel_values)
+			
+		# - Set labels
+		labels= torch.stack(labels)
+		
+		return {"pixel_values": pixel_values, "labels": labels}	
+		
+
 ##########################################
 ##    FOCAL LOSS
 ##########################################

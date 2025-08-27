@@ -52,6 +52,7 @@ from sfforecaster.dataset import VideoDataset, ImgDataset, ImgStackDataset
 from sfforecaster.custom_transforms import FlippingTransform, Rotate90Transform
 from sfforecaster.metrics import build_multi_label_metrics, build_single_label_metrics, build_ordinal_metrics
 from sfforecaster.trainer import AdvancedImbalanceTrainer
+from sfforecaster.trainer import VideoDataCollator, ImgDataCollator
 from sfforecaster.model import CoralOrdinalHead
 from sfforecaster import logger
 
@@ -104,6 +105,9 @@ def get_args():
 	parser.set_defaults(videoloader=False)
 	parser.add_argument('--vitloader', dest='vitloader', action='store_true', help='If enabled use ViTForImageClassification to load model otherwise AutoModelForImageClassification (default=false)')	
 	parser.set_defaults(vitloader=False)
+	
+	parser.add_argument('--use_model_processor', dest='use_model_processor', action='store_true', help='Use model image processor in data collator (default=false)')	
+	parser.set_defaults(use_model_processor=False)
 	
 	parser.add_argument('--binary', dest='binary', action='store_true',help='Choose binary classification label scheme (default=false)')	
 	parser.set_defaults(binary=False)
@@ -375,6 +379,58 @@ def freeze_model(model, args):
 ########################
 ##   LOAD TRANSFORM   ##
 ########################
+def load_video_transform(args, image_processor):
+	""" Load video data transform """
+	
+	# - Retrieve image processor transform parameters
+	try:
+		size = (image_processor.size["height"], image_processor.size["width"])
+	except:
+		size= (image_processor.size["shortest_edge"], image_processor.size["shortest_edge"])  # VideoMAE does not have height & width inside size
+		
+	mean = image_processor.image_mean
+	std = image_processor.image_std
+	
+	print("*** Image processor config pars ***")
+	print("do_resize? ", (image_processor.do_resize))
+	print("size: ", (size))
+	print("do_rescale? ", (image_processor.do_rescale))
+	print("rescale_factor: ", (image_processor.rescale_factor))
+	print("do_normalize? ", (image_processor.do_normalize))
+	print("mean: ", (mean))
+	print("std: ", (std))
+	print("do_convert_rgb? ", (image_processor.do_convert_rgb))
+	
+	# - Define transforms
+	mean= [0.,0.,0.]
+	std= [1.,1.,1.]
+	sigma_min= 1.0
+	sigma_max= 3.0
+	ksize= 3.3 * sigma_max
+	kernel_size= int(max(ksize, 5)) # in imgaug kernel_size viene calcolato automaticamente dalla sigma così, ma forse si può semplificare a 3x3
+	blur_aug= T.GaussianBlur(kernel_size, sigma=(sigma_min, sigma_max))
+
+	transform_train = T.Compose(
+		[
+			T.Resize(size, interpolation=T.InterpolationMode.BICUBIC),
+			FlippingTransform(),
+			Rotate90Transform(),
+			#T.ToTensor(),
+			T.Normalize(mean=mean, std=std),
+		]
+	)
+	
+	transform = T.Compose(
+		[
+			T.Resize(size, interpolation=T.InterpolationMode.BICUBIC),
+			#T.ToTensor(),
+			T.Normalize(mean=mean, std=std),
+		]
+	)
+	
+	return transform_train, transform
+	
+
 def load_transform(args, image_processor):
 	""" Load data transform """
 		
@@ -886,18 +942,33 @@ def main():
 	)
 	
 	# - Create collator fcn
-	def collate_fn(batch):
-		pixel_values= []
-		labels= []
-		for item in batch:
-			if item[0] is None:
-				continue
-			pixel_values.append(item[0])
-			labels.append(item[1])
+	#def collate_fn(batch):
+	#	pixel_values= []
+	#	labels= []
+	#	for item in batch:
+	#		if item[0] is None:
+	#			continue
+	#		pixel_values.append(item[0])
+	#		labels.append(item[1])
 			
-		pixel_values= torch.stack(pixel_values)
-		labels= torch.stack(labels)
-		return {"pixel_values": pixel_values, "labels": labels}
+	#	pixel_values= torch.stack(pixel_values)
+	#	labels= torch.stack(labels)
+	#	return {"pixel_values": pixel_values, "labels": labels}
+		
+	# - Create data collators
+	if args.videoloader:
+		data_collator= VideoDataCollator(
+			image_processor=image_processor if args.use_model_processor else None, 
+			do_resize=image_processor.do_resize if args.use_model_processor else False,                   # set to True only if processor should resize
+			do_normalize=image_processor.do_normalize if args.use_model_processor else False              # set to True only if processor should normalize
+		)
+	
+	else:
+		data_collator= ImgDataCollator(
+			image_processor=image_processor if args.use_model_processor else None, 
+			do_resize=image_processor.do_resize if args.use_model_processor else False,                   # set to True only if processor should resize
+			do_normalize=image_processor.do_normalize if args.use_model_processor else False              # set to True only if processor should normalize
+		)
 	
 	#######################################
 	##     SET TRAINER
@@ -1002,8 +1073,9 @@ def main():
 			train_dataset=dataset,
 			eval_dataset=dataset_cv,
 			compute_metrics=compute_metrics_custom,
-			processing_class=image_processor,
-			data_collator=collate_fn,
+			#processing_class=image_processor,
+			#data_collator=collate_fn,
+			data_collator=data_collator,
 			class_weights=class_weights,
 			multilabel=bool(args.multilabel),
 			loss_type=args.loss_type,                  # "ce" or "focal"
@@ -1026,8 +1098,9 @@ def main():
 			train_dataset=dataset,
 			eval_dataset=dataset_cv,
 			compute_metrics=compute_metrics_custom,		
-			processing_class=image_processor,
-			data_collator=collate_fn
+			#processing_class=image_processor,
+			#data_collator=collate_fn,
+			data_collator=data_collator,
 		)
 	
 	#######################################
