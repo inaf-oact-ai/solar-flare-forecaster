@@ -52,6 +52,7 @@ from sfforecaster.dataset import VideoDataset, ImgDataset, ImgStackDataset
 from sfforecaster.custom_transforms import FlippingTransform, Rotate90Transform
 from sfforecaster.metrics import build_multi_label_metrics, build_single_label_metrics
 from sfforecaster.trainer import AdvancedImbalanceTrainer
+from sfforecaster.model import CoralOrdinalHead
 from sfforecaster import logger
 
 # - Configure transformer logging
@@ -95,7 +96,7 @@ def get_args():
 	parser.add_argument('-resize_size', '--resize_size', dest='resize_size', required=False, type=int, default=224, action='store', help='Resize size in pixels used if --resize option is enabled (default=224)')	
 	
 	# - Model options
-	parser.add_argument('-model', '--model', dest='model', required=False, type=str, default="google/siglip-so400m-patch14-384", action='store', help='Model pretrained file name or weight path to be loaded {google/siglip-large-patch16-256, google/siglip-base-patch16-256, google/siglip-base-patch16-256-i18n, google/siglip-so400m-patch14-384, google/siglip-base-patch16-224, MCG-NJU/videomae-base, MCG-NJU/videomae-large}')
+	parser.add_argument('-model', '--model', dest='model', required=False, type=str, default="google/siglip-so400m-patch14-384", action='store', help='Model pretrained file name or weight path to be loaded {google/siglip-large-patch16-256, google/siglip-base-patch16-256, google/siglip-base-patch16-256-i18n, google/siglip-so400m-patch14-384, google/siglip-base-patch16-224, MCG-NJU/videomae-base, MCG-NJU/videomae-large, OpenGVLab/VideoMAEv2-Large}')
 	parser.add_argument('--videoloader', dest='videoloader', action='store_true',help='Use video loader (default=false)')	
 	parser.set_defaults(videoloader=False)
 	parser.add_argument('--vitloader', dest='vitloader', action='store_true', help='If enabled use ViTForImageClassification to load model otherwise AutoModelForImageClassification (default=false)')	
@@ -110,6 +111,9 @@ def get_args():
 	parser.add_argument('--multiout', dest='multiout', action='store_true',help='Do multi-step forecasting classification (default=false)')	
 	parser.set_defaults(multiout=False)
 	parser.add_argument('-num_horizons', '--num_horizons', dest='num_horizons', required=False, type=int, default=3, action='store',help='Number of forecasting horizons (default=3)')
+	
+	parser.add_argument('--ordinal', dest='ordinal', action='store_true',help='Load ordinal head model for classification (default=false)')	
+	parser.set_defaults(ordinal=False)
 	
 	#parser.add_argument('--skip_first_class', dest='skip_first_class', action='store_true',help='Skip first class (e.g. NONE/BACKGROUND) in multilabel classifier (default=false)')	
 	#parser.set_defaults(skip_first_class=False)
@@ -181,6 +185,44 @@ def get_args():
 #####################
 ##   LOAD MODELS   ##
 #####################
+def load_ordinal_image_model(
+	args,
+	num_classes=4
+):
+	"""
+		Loads an HF image classifier, replaces its classifier with CoralOrdinalHead,
+		and configures it for ordinal training.
+	"""
+    
+	# - We will emit K-1 logits for cumulative tasks
+	#   Override id2label & label2id
+	num_labels = num_classes - 1  # num_classes=4
+	id2label= {0: ">=C", 1: ">=M", 2: ">=X"} if num_classes == 4 else {i: f">=class{i+1}" for i in range(num_labels)}
+	label2id= {">=C": 0, ">=M": 1, ">=X": 2} if num_classes == 4 else {f">=class{i+1}": i for i in range(num_labels)}
+	
+	print("--> Ordinal id2label")
+	print(id2label)
+	print("--> Ordinal label2id")
+	print(label2id)
+	
+	# - Define model
+	model = AutoModelForImageClassification.from_pretrained(
+		args.model,
+		problem_type="multi_label_classification",   # BCEWithLogitsLoss inside HF
+		num_labels=num_labels,
+		id2label=id2label,
+		label2id=label2id,
+	)
+
+	# - Get input feature size from the existing classifier
+	if hasattr(model, "classifier") and isinstance(model.classifier, nn.Linear):
+		in_features = model.classifier.in_features
+		model.classifier = CoralOrdinalHead(in_features, num_classes=num_classes)
+	else:
+		raise RuntimeError("Could not locate a linear classification layer named classifier to replace.")
+
+	return model
+	
 
 def load_image_model(
 	args,
@@ -225,20 +267,26 @@ def load_image_model(
 	#==     SINGLE-OUT MODEL
 	#===================================
 	else:
-		# - Load model
-		model = AutoModelForImageClassification.from_pretrained(
-			args.model, 
-			problem_type="single_label_classification", 
-			id2label=id2label, 
-			label2id=label2id,
-			num_labels=num_labels
-		)
+	
+		if args.ordinal:
+			# - Load ordinal-head model
+			model= load_ordinal_image_model(args, nclasses)
+		else:
+			# - Load standard model
+			model = AutoModelForImageClassification.from_pretrained(
+				args.model, 
+				problem_type="single_label_classification", 
+				id2label=id2label, 
+				label2id=label2id,
+				num_labels=num_labels
+			)
 		
 		# - Load processor	
 		image_processor = AutoImageProcessor.from_pretrained(args.model)
 		
 	return model, image_processor	
 	
+						
 			
 def load_video_model(
 	args,
@@ -708,7 +756,7 @@ def main():
 	
 	# - Set config options
 	id2label, label2id, id2target= get_target_maps(binary=args.binary, flare_thr=args.flare_thr)
-	num_labels= len(id2label)  # - If skip_first_class, this is =3
+	num_labels= len(id2label)  # - If binary this is =2
 	nclasses= num_labels
 	label_names= list(label2id.keys())
 	
@@ -790,7 +838,7 @@ def main():
 		compute_metrics_custom= build_single_label_metrics(label_names)
 		
 	# - Compute class weights
-	num_labels = model.config.num_labels
+	#num_labels = model.config.num_labels # this is modified in ordinal model
 	class_weights= None
 	if args.use_weighted_loss:
 		logger.info("Computing class weights from dataset ...")
@@ -801,6 +849,20 @@ def main():
 		)
 		print("--> CLASS WEIGHTS")
 		print(class_weights)
+		
+	# - Compute ordinal pos weights
+	ordinal_pos_weights= None
+	if args.use_weighted_loss:
+		logger.info("Computing ordinal pos_weight from dataset ...")
+		ordinal_pos_weights, _= dataset.compute_ordinal_pos_weight(
+			num_classes=num_labels, 
+			id2target=id2target, 
+			eps=1e-12, 
+			clip_max=200, # clip if a class is missing otherwise pos weights becomes huge
+			device="cuda" if torch.cuda.is_available() else "cpu"
+		)
+		print("--> ORDINAL POS WEIGHTS")
+		print(ordinal_pos_weights)
 	
 	# - Compute weights for data sampler
 	sample_weights = None
@@ -874,7 +936,9 @@ def main():
 			sol_score=args.sol_score,
 			sol_distribution=args.sol_distribution,
 			sol_mode=args.sol_mode,
-			sol_add_constant=args.sol_add_constant
+			sol_add_constant=args.sol_add_constant,
+			ordinal=bool(args.ordinal),
+			ordinal_pos_weight=ordinal_pos_weight
 		)
 		
 	else:
