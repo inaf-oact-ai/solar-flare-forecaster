@@ -82,7 +82,7 @@ def _ensure_float_0_1(x):
 	return x
 
 
-class VideoFlipping(nn.Module):
+class VideoFlipping(torch.nn.Module):
 	"""Flipping: left-right, up-down, or nothing (chosen once per clip)."""
 
 	def __init__(self):
@@ -141,7 +141,7 @@ class VideoNormalize(torch.nn.Module):
 		return _maybe_to_list(vid, to_list)
 
 
-class VideoRotate90(nn.Module):
+class VideoRotate90(torch.nn.Module):
 	"""Rotate the whole clip by one of {90, 180, 270, none} degrees."""
 
 	def __init__(self):
