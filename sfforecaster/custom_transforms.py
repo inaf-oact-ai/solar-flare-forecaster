@@ -114,7 +114,7 @@ class VideoResize(torch.nn.Module):
 		T_, C, H, W = vid.shape
         
 		# Apply with a single call by flattening time into batch
-		vid = F.resize(
+		vid = TF.resize(
 			vid.reshape(-1, C, H, W),
 			self.size,
 			interpolation=self.interp,
