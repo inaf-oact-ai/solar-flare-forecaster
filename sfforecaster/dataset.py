@@ -140,28 +140,32 @@ class BaseVisDataset(Dataset):
 			logger.error("No filepaths field present in input data!")
 			return None	
 		
-		# - Load and concat image frames
-		#   NB: VideoMAE processor requires a list of images like the below frame
-		#       inputs= image_processor(frames, return_tensors='pt') ==> inputs["pixel_values"].shape is [T, C, H, W]
+		# - Load and concat image frames as List of T tensors of shape [C,H,W]
 		frames = [self.load_tensor(p) for p in image_paths]
 		
+		# - Apply transform (should work on list [C,H,W] or tensor [T,C,H,W])
+		if self.transform:
+			frames= self.transform(frames)
+		
 		# - Create video tensor
-		video= torch.stack(frames)  # Shape: [T, C, H, W]
+		#video= torch.stack(frames)  # Shape: [T, C, H, W]
 		
 		# - Change tensor shape as PyTorchVideo transform API requires inputs with shape: [C, T, H, W]
-		video_cthw= video.permute(1, 0, 2, 3)  # Shape: [C, T, H, W]
+		#video_cthw= video.permute(1, 0, 2, 3)  # Shape: [C, T, H, W]
 		
 		# - Apply transforms
 		#   NB: PyTorchVideo transform API requires inputs with shape: [C, T, H, W]
-		if self.transform:
-			video_cthw= self.transform(video_cthw)
+		#if self.transform:
+		#	video_cthw= self.transform(video_cthw)
 			
-		# - Convert back to Shape: [T, C, H, W]
-		frames_transformed = list(video_cthw.permute(1, 0, 2, 3).unbind(dim=0))
-		video_transformed= torch.stack(frames_transformed)
+		# - Convert back to list of T tensors of Shape: [C, H, W]
+		#frames_transformed = list(video_cthw.permute(1, 0, 2, 3).unbind(dim=0))
+		###video_transformed= torch.stack(frames_transformed)
 		
-		return frames_transformed
-		#return video_transformed
+		#return frames_transformed
+		##return video_transformed
+		return frames
+		
 		
 	def load_image_stack(self, idx):
 		""" Load multi-channel image as PyTorch tensor with transforms applied """
@@ -507,6 +511,7 @@ class VideoDataset(BaseVisDataset):
 		id2target=None,
 		multiout=False,
 		multilabel=False,
+		ordinal=False,
 		verbose=False
 	):
 		super().__init__(
@@ -523,29 +528,33 @@ class VideoDataset(BaseVisDataset):
 		self.mlb = MultiLabelBinarizer(classes=np.arange(0, self.nclasses))
 		self.multiout= multiout
 		self.multilabel= multilabel
-		
+		self.ordinal= ordinal
 		
 	def __getitem__(self, idx):
 		""" Iterator providing training data (pixel_values + labels) """
 		
 		# - Load image at index as tensor 
-		video_tensor= self.load_video(idx)
+		frame_tensor_list= self.load_video(idx)
 		
 		# - Get class ids
 		if self.multiout:
 			if self.multilabel:
-				class_id= self.load_hotenc_targets(idx, self.id2target, self.mlb)
+				class_id_tensor= self.load_hotenc_targets(idx, self.id2target, self.mlb)
+			elif self.ordinal:	
+				raise ValueError("Ordinal training not implemented/supported for multilabel!")
 			else:
 				class_id= self.load_targets(idx, self.id2target)
+				class_id_tensor= torch.tensor(class_id, dtype=torch.long)
 		else:
 			if self.multilabel:
-				class_id= self.load_hotenc_target(idx, self.id2target, self.mlb)
+				class_id_tensor= self.load_hotenc_target(idx, self.id2target, self.mlb)
+			elif self.ordinal:
+				class_id_tensor= self.load_ordinal_target(idx)
 			else:
 				class_id= self.load_target(idx, self.id2target)
-		
-		class_id_tensor= torch.tensor(class_id, dtype=torch.long)
-		
-		return video_tensor, class_id_tensor
+				class_id_tensor= torch.tensor(class_id, dtype=torch.long)
+				
+		return frame_tensor_list, class_id_tensor
 		
 ################################################
 ###   IMAGE-BASED FORECASTER
@@ -593,9 +602,12 @@ class ImgDataset(BaseVisDataset):
 		# - Get class ids
 		if self.multiout:
 			if self.multilabel:
-				class_id= self.load_hotenc_targets(idx, self.id2target, self.mlb)
+				class_id_tensor= self.load_hotenc_targets(idx, self.id2target, self.mlb)
+			elif self.ordinal:	
+				raise ValueError("Ordinal training not implemented/supported for multilabel!")
 			else:
 				class_id= self.load_targets(idx, self.id2target)
+				class_id_tensor= torch.tensor(class_id, dtype=torch.long)
 		else:
 			if self.multilabel:
 				class_id_tensor= self.load_hotenc_target(idx, self.id2target, self.mlb)
@@ -625,6 +637,7 @@ class ImgStackDataset(BaseVisDataset):
 		id2target=None,
 		multiout=False,
 		multilabel=False,
+		ordinal=False,
 		verbose=False
 	):
 		super().__init__(
@@ -640,6 +653,7 @@ class ImgStackDataset(BaseVisDataset):
 		self.mlb = MultiLabelBinarizer(classes=np.arange(0, self.nclasses))
 		self.multiout= multiout
 		self.multilabel= multilabel
+		self.ordinal= ordinal
 		
 	def __getitem__(self, idx):
 		""" Iterator providing training data (pixel_values + labels) """
@@ -650,16 +664,20 @@ class ImgStackDataset(BaseVisDataset):
 		# - Get class ids
 		if self.multiout:
 			if self.multilabel:
-				class_id= self.load_hotenc_targets(idx, self.id2target, self.mlb)
+				class_id_tensor= self.load_hotenc_targets(idx, self.id2target, self.mlb)
+			elif self.ordinal:	
+				raise ValueError("Ordinal training not implemented/supported for multilabel!")
 			else:
 				class_id= self.load_targets(idx, self.id2target)
+				class_id_tensor= torch.tensor(class_id, dtype=torch.long)
 		else:
 			if self.multilabel:
-				class_id= self.load_hotenc_target(idx, self.id2target, self.mlb)
+				class_id_tensor= self.load_hotenc_target(idx, self.id2target, self.mlb)
+			elif self.ordinal:
+				class_id_tensor= self.load_ordinal_target(idx)	
 			else:
 				class_id= self.load_target(idx, self.id2target)
-		
-		class_id_tensor= torch.tensor(class_id, dtype=torch.long)
+				class_id_tensor= torch.tensor(class_id, dtype=torch.long)
 		
 		return imgstack_tensor, class_id_tensor
 		
