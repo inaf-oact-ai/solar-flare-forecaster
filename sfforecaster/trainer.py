@@ -158,8 +158,8 @@ class VideoDataCollator:
 			vids_tchw = [torch.stack(item, dim=0) for item in videos]
 			pixel_values = torch.stack(vids_tchw, dim=0).float()
 
-		print("pixel_values")
-		print(pixel_values.shape)
+		#print("pixel_values")
+		#print(pixel_values.shape)
 
 		# - VideoMAE model require a Tensor of Shape: [B,C,T,H,W]
 		###pixel_values = pixel_values.permute(0, 2, 1, 3, 4)  # Tensor of Shape: [B,C,T,H,W]
@@ -167,6 +167,13 @@ class VideoDataCollator:
 			
 		# - Set labels
 		labels= torch.stack(labels)
+		
+		# - Check if any NaN in pixel_values
+		if torch.isnan(pixel_values).any():
+			logger.warning("⚠️ NaN values detected in batch tensor!")
+
+		if torch.isinf(pixel_values).any():
+			logger.warning("⚠️ Inf values detected in batch tensor!")
 		
 		return {"pixel_values": pixel_values, "labels": labels}	
 		
