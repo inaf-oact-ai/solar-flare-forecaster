@@ -17,6 +17,49 @@ import torch.nn as nn
 from transformers import VideoMAEForVideoClassification
 from transformers import ViTForImageClassification
 
+
+###########################################
+###     CORAL ORDINAL HEAD MODEL
+###########################################
+class CoralOrdinalHead(nn.Module):
+	"""
+		Structural ordinal head for K ordered classes.
+		Produces K-1 logits corresponding to [y>=class_1, ..., y>=class_{K-1}].
+
+		For your case K=4 (NONE < C < M < X) -> 3 logits: [>=C, >=M, >=X].
+	"""
+	def __init__(self, in_features: int, num_classes: int):
+		super().__init__()
+		assert num_classes >= 2
+		self.num_classes = num_classes
+		self.num_thresholds = num_classes - 1
+
+		# Single scalar score s(x)
+		self.score = nn.Linear(in_features, 1)
+
+		# Unconstrained parameters for thresholds; will be mapped to strictly increasing cutpoints
+		self.theta_unconstrained = nn.Parameter(torch.zeros(self.num_thresholds))
+
+		# Optional: small bias to start thresholds roughly ordered
+		nn.init.normal_(self.theta_unconstrained, mean=0.0, std=0.02)
+
+	def ordered_cutpoints(self):
+		# Softplus ensures positivity, cumsum enforces strict monotonicity
+		# You can add an offset if needed; usually not necessary.
+		deltas = F.softplus(self.theta_unconstrained)
+		return torch.cumsum(deltas, dim=0)  # shape: (K-1,)
+
+	def forward(self, features: torch.Tensor) -> torch.Tensor:
+		"""
+			features: (B, in_features)
+			returns logits: (B, K-1) for cumulative targets [>=C, >=M, >=X]
+		"""
+		s = self.score(features)                  # (B, 1)
+		cut = self.ordered_cutpoints()           # (K-1,)
+		logits = s - cut.view(1, -1)             # broadcast to (B, K-1)
+		return logits
+
+
 ###########################################
 ###     MULTI-HORIZON VIDEO MODEL
 ###########################################
