@@ -1,0 +1,52 @@
+#!/usr/bin/env python
+
+from __future__ import print_function
+
+##################################################
+###          MODULE IMPORT
+##################################################
+# - STANDARD MODULES
+import sys
+import os
+import random
+import numpy as np
+
+# - TORCH
+import torch
+
+
+##############################
+###   IMAGE LOAD
+##############################
+def load_img_for_inference(
+	dataset, idx, 
+	processor=None, 
+	do_resize=False, 
+	do_normalize=False,
+	do_rescale=False
+):
+	""" Load image data for inference """
+	
+	# - Load image from dataset
+	#   NB: This returns a Tensor of Shape [C,H,W] with transforms applied (if dataset has transform)
+	pixel_values= dataset.load_image(idx)
+	
+	# - Apply model image processor?
+	if processor is not None:	
+		proc_out = processor(
+			pixel_values,
+			return_tensors="pt",
+			do_resize=do_resize,       # set False if already resized
+			do_normalize=do_normalize, # set False if already normalized
+			do_rescale=do_rescale,     # set False if already scaled
+		)
+		pixel_values = proc_out["pixel_values"]
+	
+	# - Add batch dim for inference
+	pixel_values= pixel_values.unsqueeze(0).to(device)
+	
+	return pixel_values
+	
+##############################
+###   VIDEO LOAD
+##############################
