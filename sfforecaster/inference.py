@@ -29,21 +29,22 @@ def load_img_for_inference(
 	
 	# - Load image from dataset
 	#   NB: This returns a Tensor of Shape [C,H,W] with transforms applied (if dataset has transform)
-	pixel_values= dataset.load_image(idx)
+	input_tensor= dataset.load_image(idx)
 	
 	# - Apply model image processor?
 	if processor is not None:	
 		proc_out = processor(
-			pixel_values,
+			input_tensor,
 			return_tensors="pt",
 			do_resize=do_resize,       # set False if already resized
 			do_normalize=do_normalize, # set False if already normalized
 			do_rescale=do_rescale,     # set False if already scaled
 		)
-		pixel_values = proc_out["pixel_values"]
+		pixel_values = proc_out["pixel_values"]  # This has already the batch dim
 	
-	# - Add batch dim for inference
-	pixel_values= pixel_values.unsqueeze(0)
+	else:
+		# - Add batch dim for inference
+		pixel_values= pixel_values.unsqueeze(0)
 	
 	return pixel_values
 	
