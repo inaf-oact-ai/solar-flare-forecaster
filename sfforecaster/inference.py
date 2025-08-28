@@ -43,7 +43,7 @@ def load_img_for_inference(
 		pixel_values = proc_out["pixel_values"]
 	
 	# - Add batch dim for inference
-	pixel_values= pixel_values.unsqueeze(0).to(device)
+	pixel_values= pixel_values.unsqueeze(0)
 	
 	return pixel_values
 	
