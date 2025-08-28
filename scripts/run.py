@@ -715,7 +715,7 @@ def run_predict(
 				idx=i, 
 				processor=image_processor if args.use_model_processor else None, 
 				do_resize=image_processor.do_resize if args.use_model_processor else False,                   # set to True only if processor should resize
-				do_normalize=image_processor.do_normalize if args.use_model_processor else False              # set to True only if processor should normalize
+				do_normalize=image_processor.do_normalize if args.use_model_processor else False,              # set to True only if processor should normalize
 				do_rescale=image_processor.do_rescale if args.use_model_processor else False                  # set to True only if processor should rescale
 			)
 		else:
@@ -724,7 +724,7 @@ def run_predict(
 				idx=i, 
 				processor=image_processor if args.use_model_processor else None, 
 				do_resize=image_processor.do_resize if args.use_model_processor else False,                   # set to True only if processor should resize
-				do_normalize=image_processor.do_normalize if args.use_model_processor else False              # set to True only if processor should normalize
+				do_normalize=image_processor.do_normalize if args.use_model_processor else False,              # set to True only if processor should normalize
 				do_rescale=image_processor.do_rescale if args.use_model_processor else False                  # set to True only if processor should rescale
 			)
 		
@@ -959,7 +959,7 @@ def main():
 		data_collator= VideoDataCollator(
 			image_processor=image_processor if args.use_model_processor else None, 
 			do_resize=image_processor.do_resize if args.use_model_processor else False,                   # set to True only if processor should resize
-			do_normalize=image_processor.do_normalize if args.use_model_processor else False              # set to True only if processor should normalize
+			do_normalize=image_processor.do_normalize if args.use_model_processor else False,              # set to True only if processor should normalize
 			do_rescale=image_processor.do_rescale if args.use_model_processor else False                  # set to True only if processor should rescale
 		)
 	
@@ -967,7 +967,7 @@ def main():
 		data_collator= ImgDataCollator(
 			image_processor=image_processor if args.use_model_processor else None, 
 			do_resize=image_processor.do_resize if args.use_model_processor else False,                   # set to True only if processor should resize
-			do_normalize=image_processor.do_normalize if args.use_model_processor else False              # set to True only if processor should normalize
+			do_normalize=image_processor.do_normalize if args.use_model_processor else False,              # set to True only if processor should normalize
 			do_rescale=image_processor.do_rescale if args.use_model_processor else False                  # set to True only if processor should rescale
 		)
 	
