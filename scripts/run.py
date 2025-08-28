@@ -55,6 +55,9 @@ from sfforecaster.metrics import build_multi_label_metrics, build_single_label_m
 from sfforecaster.trainer import AdvancedImbalanceTrainer
 from sfforecaster.trainer import VideoDataCollator, ImgDataCollator
 from sfforecaster.model import CoralOrdinalHead
+from sfforecaster.inference import coral_logits_to_class_probs, coral_decode_with_thresholds
+from sfforecaster.inference import load_img_for_inference, load_video_for_inference
+
 from sfforecaster import logger
 
 # - Configure transformer logging
@@ -675,54 +678,12 @@ def run_test(
 ##############################
 ##     RUN PREDICT
 ##############################
-def coral_logits_to_class_probs(logits: torch.Tensor) -> torch.Tensor:
-	"""
-		Convert CORAL/cumulative logits (K-1,) or (1, K-1) to K-class probs (K,).
-		Works for any K >= 2. For K=4: logits = [>=C, >=M, >=X].
-	"""
-	if logits.dim() == 2:
-		logits = logits.squeeze(0)   # (K-1,)
-	Km1 = logits.shape[0]
-	K = Km1 + 1
-
-	p_ge = torch.sigmoid(logits)     # (K-1,)
-
-	# optional: enforce non-increasing p_ge to avoid tiny numerical violations
-	for i in range(1, Km1):
-		p_ge[i] = torch.minimum(p_ge[i], p_ge[i-1])
-
-	# K-class probabilities from cumulative probs
-	comps = [1.0 - p_ge[0]]                         # P(class 0)
-	for k in range(1, Km1):
-		comps.append(p_ge[k-1] - p_ge[k])           # P(class k)
-	comps.append(p_ge[Km1-1])                       # P(class K-1)
-
-	probs = torch.stack(comps)                      # (K,)
-	probs = torch.clamp(probs, min=1e-12)
-	probs = probs / probs.sum()
-	return probs  # (K,)
-
-def coral_decode_with_thresholds(logits: torch.Tensor, thresholds=None) -> int:
-	"""
-		Count thresholds passed: class = sum( sigmoid(logit_k) >= t_k ).
-		Defaults to t_k = 0.5 if thresholds is None.
-	"""
-	if logits.dim() == 2:
-		logits = logits.squeeze(0)
-	p_ge = torch.sigmoid(logits)
-	if thresholds is None:
-		ge = (p_ge >= 0.5).int()
-	else:
-		thr = torch.as_tensor(thresholds, dtype=logits.dtype, device=logits.device)
-		ge = (p_ge >= thr).int()
-	return int(ge.sum().item())
-
-
 def run_predict(
 	model,
 	dataset,
 	args,
-	id2label
+	id2label,
+	image_processor=None
 ):
 	""" Run model predict """
 	
@@ -743,15 +704,35 @@ def run_predict(
 			sname= image_info["sname"]
 			
 		# - Load image/video 
+		#if args.videoloader:
+		#	input_tensor= dataset.load_video(i)
+		#else: 
+		#	input_tensor= dataset.load_image(i)
+		
 		if args.videoloader:
-			input_tensor= dataset.load_video(i)
-		else: 
-			input_tensor= dataset.load_image(i)
+			input_tensor= load_video_for_inference(
+				dataset=dataset, 
+				idx=i, 
+				processor=image_processor if args.use_model_processor else None, 
+				do_resize=image_processor.do_resize if args.use_model_processor else False,                   # set to True only if processor should resize
+				do_normalize=image_processor.do_normalize if args.use_model_processor else False              # set to True only if processor should normalize
+				do_rescale=image_processor.do_rescale if args.use_model_processor else False                  # set to True only if processor should rescale
+			)
+		else:
+			input_tensor= load_img_for_inference(
+				dataset=dataset, 
+				idx=i, 
+				processor=image_processor if args.use_model_processor else None, 
+				do_resize=image_processor.do_resize if args.use_model_processor else False,                   # set to True only if processor should resize
+				do_normalize=image_processor.do_normalize if args.use_model_processor else False              # set to True only if processor should normalize
+				do_rescale=image_processor.do_rescale if args.use_model_processor else False                  # set to True only if processor should rescale
+			)
 		
 		if input_tensor is None:
 			logger.warning("Skip None tensor at index %d ..." % (i))
 			continue
-		input_tensor= input_tensor.unsqueeze(0).to(device)
+		#input_tensor= input_tensor.unsqueeze(0).to(device)
+ 		input_tensor= input_tensor.to(device)
  
  		# - Compute model outputs
 		with torch.no_grad():
@@ -979,6 +960,7 @@ def main():
 			image_processor=image_processor if args.use_model_processor else None, 
 			do_resize=image_processor.do_resize if args.use_model_processor else False,                   # set to True only if processor should resize
 			do_normalize=image_processor.do_normalize if args.use_model_processor else False              # set to True only if processor should normalize
+			do_rescale=image_processor.do_rescale if args.use_model_processor else False                  # set to True only if processor should rescale
 		)
 	
 	else:
@@ -986,6 +968,7 @@ def main():
 			image_processor=image_processor if args.use_model_processor else None, 
 			do_resize=image_processor.do_resize if args.use_model_processor else False,                   # set to True only if processor should resize
 			do_normalize=image_processor.do_normalize if args.use_model_processor else False              # set to True only if processor should normalize
+			do_rescale=image_processor.do_rescale if args.use_model_processor else False                  # set to True only if processor should rescale
 		)
 	
 	#######################################
@@ -1136,7 +1119,7 @@ def main():
 	# - Run predict
 	elif args.predict:
 		logger.info("Running model inference on input data %s ..." % (args.datalist))
-		run_predict(model, dataset, args, id2label)
+		run_predict(model, dataset, args, id2label, image_processor)
 	
 	################################
 	##    TRAIN
