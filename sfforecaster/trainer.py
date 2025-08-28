@@ -549,7 +549,7 @@ class AdvancedImbalanceTrainer(Trainer):
 		self.sol_add_constant= sol_add_constant
 		self.ordinal= ordinal
 		self.ordinal_pos_weights= ordinal_pos_weights
-		self.verbose
+		self.verbose= verbose
 
 		# - Build the loss criterion
 		if self.multilabel:
