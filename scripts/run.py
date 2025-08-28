@@ -1105,7 +1105,8 @@ def main():
 			sol_mode=args.sol_mode,
 			sol_add_constant=args.sol_add_constant,
 			ordinal=bool(args.ordinal),
-			ordinal_pos_weights=ordinal_pos_weights
+			ordinal_pos_weights=ordinal_pos_weights,
+			verbose=args.verbose
 		)
 		
 	else:

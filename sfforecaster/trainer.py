@@ -533,6 +533,7 @@ class AdvancedImbalanceTrainer(Trainer):
 		sol_add_constant=False,
 		ordinal=False,
 		ordinal_pos_weights=None,
+		verbose=False,
 		**kwargs
 	):
 		super().__init__(*args, **kwargs)
@@ -548,6 +549,7 @@ class AdvancedImbalanceTrainer(Trainer):
 		self.sol_add_constant= sol_add_constant
 		self.ordinal= ordinal
 		self.ordinal_pos_weights= ordinal_pos_weights
+		self.verbose
 
 		# - Build the loss criterion
 		if self.multilabel:
@@ -638,11 +640,7 @@ class AdvancedImbalanceTrainer(Trainer):
 		if torch.isnan(logits).any() or torch.isinf(logits).any():
 			print("⚠️ NaN values detected in logits tensor!")
 			
-		print("logits")
-		print(logits)
-		print("labels")
-		print(labels)
-
+		
 		if self.multilabel:
 			labels = labels.float()
 			loss = self.loss_fct(logits, labels)
@@ -652,8 +650,13 @@ class AdvancedImbalanceTrainer(Trainer):
 			#  - multiclass: logits (B,K), labels (B,)
 			loss = self.loss_fct(logits, labels)
 			
-		print("loss")
-		print(loss)
+		if self.verbose:
+			print("logits")
+			print(logits)
+			print("labels")
+			print(labels)
+			print("loss")
+			print(loss)
 
 		return (loss, outputs) if return_outputs else loss
 
