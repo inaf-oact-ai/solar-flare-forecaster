@@ -651,6 +651,9 @@ class AdvancedImbalanceTrainer(Trainer):
 			#  - binary: logits shape (B,) or (B,1), labels (B,)
 			#  - multiclass: logits (B,K), labels (B,)
 			loss = self.loss_fct(logits, labels)
+			
+		print("loss")
+		print(loss)
 
 		return (loss, outputs) if return_outputs else loss
 
