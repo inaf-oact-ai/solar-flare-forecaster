@@ -732,7 +732,7 @@ def run_predict(
 			logger.warning("Skip None tensor at index %d ..." % (i))
 			continue
 		#input_tensor= input_tensor.unsqueeze(0).to(device)
- 		input_tensor= input_tensor.to(device)
+		input_tensor= input_tensor.to(device)
  
  		# - Compute model outputs
 		with torch.no_grad():
