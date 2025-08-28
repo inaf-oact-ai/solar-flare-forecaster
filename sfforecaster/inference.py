@@ -51,3 +51,38 @@ def load_img_for_inference(
 ##############################
 ###   VIDEO LOAD
 ##############################
+def load_video_for_inference(
+	dataset, idx, 
+	processor=None, 
+	do_resize=False, 
+	do_normalize=False,
+	do_rescale=False
+):
+	""" Load video for inference """
+	
+	# - Load video frames
+	#   NB: This returns a list of T tensor of Shape [C,H,W] with transforms applied (if dataset has transform)
+	input_frames= dataset.load_video(idx)
+	
+	# - Add batch dim as 2D list
+	videos= [input_frames]
+
+	# - Set pixel values ---
+	if processor is not None:
+		# - NB: This works only with list of list of [C,H,W]
+		proc_out = processor(
+			videos,                      # list of length B; each item is list of T HWC frames
+			return_tensors="pt",
+			do_resize=do_resize,        # set False if you already resized
+			do_normalize=do_normalize,  # set False if you already normalized
+			do_rescale=do_rescale,      # set False if already rescaled
+		)
+		pixel_values = proc_out["pixel_values"].float()  # Shape: [B,T,C,H,W]
+			
+	else:
+		# - Convert 2D list to tensor of Shape: [B,T,C,H,W]
+		vids_tchw = [torch.stack(item, dim=0) for item in videos]
+		pixel_values = torch.stack(vids_tchw, dim=0).float()
+		
+	return pixel_values
+
