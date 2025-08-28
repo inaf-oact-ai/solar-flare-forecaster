@@ -85,4 +85,50 @@ def load_video_for_inference(
 		pixel_values = torch.stack(vids_tchw, dim=0).float()
 		
 	return pixel_values
+	
+###################################
+##  ORDINAL HELPERS
+###################################
+def coral_logits_to_class_probs(logits: torch.Tensor) -> torch.Tensor:
+	"""
+		Convert CORAL/cumulative logits (K-1,) or (1, K-1) to K-class probs (K,).
+		Works for any K >= 2. For K=4: logits = [>=C, >=M, >=X].
+	"""
+	if logits.dim() == 2:
+		logits = logits.squeeze(0)   # (K-1,)
+	Km1 = logits.shape[0]
+	K = Km1 + 1
+
+	p_ge = torch.sigmoid(logits)     # (K-1,)
+
+	# optional: enforce non-increasing p_ge to avoid tiny numerical violations
+	for i in range(1, Km1):
+		p_ge[i] = torch.minimum(p_ge[i], p_ge[i-1])
+
+	# K-class probabilities from cumulative probs
+	comps = [1.0 - p_ge[0]]                         # P(class 0)
+	for k in range(1, Km1):
+		comps.append(p_ge[k-1] - p_ge[k])           # P(class k)
+	comps.append(p_ge[Km1-1])                       # P(class K-1)
+
+	probs = torch.stack(comps)                      # (K,)
+	probs = torch.clamp(probs, min=1e-12)
+	probs = probs / probs.sum()
+	return probs  # (K,)
+
+def coral_decode_with_thresholds(logits: torch.Tensor, thresholds=None) -> int:
+	"""
+		Count thresholds passed: class = sum( sigmoid(logit_k) >= t_k ).
+		Defaults to t_k = 0.5 if thresholds is None.
+	"""
+	if logits.dim() == 2:
+		logits = logits.squeeze(0)
+	p_ge = torch.sigmoid(logits)
+	if thresholds is None:
+		ge = (p_ge >= 0.5).int()
+	else:
+		thr = torch.as_tensor(thresholds, dtype=logits.dtype, device=logits.device)
+		ge = (p_ge >= thr).int()
+	return int(ge.sum().item())
+
 

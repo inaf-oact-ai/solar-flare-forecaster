@@ -47,10 +47,11 @@ from sfforecaster import logger
 ##    DATA COLLATORS
 ##########################################
 class ImgDataCollator:
-	def __init__(self, image_processor=None, do_resize=True, do_normalize=True):
+	def __init__(self, image_processor=None, do_resize=True, do_normalize=True, do_rescale=True):
 		self.processor = image_processor
 		self.do_resize = do_resize
 		self.do_normalize = do_normalize
+		self.do_rescale= do_rescale
 	
 	def __call__(self, batch):
 		
@@ -87,6 +88,7 @@ class ImgDataCollator:
 				return_tensors="pt",
 				do_resize=self.do_resize,       # set False if already resized
 				do_normalize=self.do_normalize, # set False if already normalized
+				do_rescale=self.do_rescale,     # set False if already rescaled
 			)
 			pixel_values = proc_out["pixel_values"]
 			
@@ -102,11 +104,11 @@ class ImgDataCollator:
 		
 
 class VideoDataCollator:
-	def __init__(self, image_processor=None, do_resize=True, do_normalize=True):
+	def __init__(self, image_processor=None, do_resize=True, do_normalize=True, do_rescale=True):
 		self.processor = image_processor
 		self.do_resize = do_resize
 		self.do_normalize = do_normalize
-
+		self.do_rescale= do_rescale
 
 	@staticmethod
 	def _to_bcthw(x: torch.Tensor) -> torch.Tensor:
@@ -148,8 +150,9 @@ class VideoDataCollator:
 			proc_out = self.processor(
 				videos,                      # list of length B; each item is list of T HWC frames
 				return_tensors="pt",
-				do_resize=self.do_resize,    # set False if you already resized
+				do_resize=self.do_resize,        # set False if you already resized
 				do_normalize=self.do_normalize,  # set False if you already normalized
+				do_rescale=self.do_rescale,      # set False if already rescaled
 			)
 			pixel_values = proc_out["pixel_values"].float()  # Shape: [B,T,C,H,W]
 			
