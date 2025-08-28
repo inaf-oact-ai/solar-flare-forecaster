@@ -44,7 +44,7 @@ def load_img_for_inference(
 	
 	else:
 		# - Add batch dim for inference
-		pixel_values= pixel_values.unsqueeze(0)
+		pixel_values= input_tensor.unsqueeze(0)
 	
 	return pixel_values
 	
