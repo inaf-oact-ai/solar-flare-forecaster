@@ -1074,7 +1074,7 @@ def main():
 			train_dataset=dataset,
 			eval_dataset=dataset_cv,
 			compute_metrics=compute_metrics_custom,
-			#processing_class=image_processor,
+			processing_class=image_processor,
 			#data_collator=collate_fn,
 			data_collator=data_collator,
 			class_weights=class_weights,
@@ -1100,7 +1100,7 @@ def main():
 			train_dataset=dataset,
 			eval_dataset=dataset_cv,
 			compute_metrics=compute_metrics_custom,		
-			#processing_class=image_processor,
+			processing_class=image_processor,
 			#data_collator=collate_fn,
 			data_collator=data_collator,
 		)
