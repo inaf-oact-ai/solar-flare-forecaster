@@ -204,6 +204,25 @@ def compute_micro_metrics_from_confusion_matrix(cm, eps=1e-7):
 		"overall_accuracy": overall_acc
 	}
 	
+def best_tss_from_probs(p_pos, y_true, num_ticks=101, eps=1e-7):
+	""" For binary classification: compute TSS vs threshold and select best TSS"""
+	# p_pos: numpy array of P(class=1) ; y_true: {0,1}
+	thrs = np.linspace(0.0, 1.0, num_ticks)
+	best = {"tss": -1.0, "thr": 0.5, "tpr": 0.0, "tnr": 0.0}
+	for t in thrs:
+		y_pred = (p_pos >= t).astype(int)
+		TP = ((y_true==1) & (y_pred==1)).sum()
+		TN = ((y_true==0) & (y_pred==0)).sum()
+		FP = ((y_true==0) & (y_pred==1)).sum()
+		FN = ((y_true==1) & (y_pred==0)).sum()
+		tpr = TP / (TP + FN + eps)
+		tnr = TN / (TN + FP + eps)
+		tss = tpr + tnr - 1.0
+		if tss > best["tss"]:
+			best = {"tss": tss, "thr": float(t), "tpr": tpr, "tnr": tnr}
+
+	return best
+	
 def coral_probs_from_logits(logits_t: torch.Tensor) -> torch.Tensor:
 	"""
 		Convert CORAL/cumulative logits (B, K-1) into K-class probabilities (B, K).
@@ -498,6 +517,7 @@ def single_label_metrics(predictions, labels, target_names=None):
 	
 		# - Compute global metrics (as done in other papers)
 		metrics_micro= compute_micro_metrics_from_confusion_matrix(cm)
+		
 	
 	# - Return as dictionary
 	metrics = {
@@ -554,6 +574,21 @@ def single_label_metrics(predictions, labels, target_names=None):
 			'accuracy_micro': metrics_micro['overall_accuracy']
 		}
 	)
+	
+	# - For binary class compute best TSS vs threshold
+	if binary_class:
+		# - probs from logits already computed above
+		p_pos = probs[:, 1].numpy()          # assumes index 1 is positive (C+ or M+)
+		y_true_np = y_true
+
+		# - log and add to the returned metrics dict
+		best = best_tss_from_probs(p_pos, y_true_np)
+		metrics.update({
+			"tss_best": best["tss"],
+			"tss_best_thr": best["thr"],
+			"tss_best_tpr": best["tpr"],
+			"tss_best_tnr": best["tnr"],
+		})
 	
 	print("--> metrics")
 	print(metrics)
