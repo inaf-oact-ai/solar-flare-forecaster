@@ -334,6 +334,9 @@ class BaseVisDataset(Dataset):
 			ys.append(int(y))
 		
 		counts = np.bincount(ys, minlength=num_classes).astype(float)
+		
+		print("counts")
+		print(counts)
 
 		if scheme == "inverse":
 			w = 1.0 / np.maximum(counts, 1.0)
@@ -343,8 +346,14 @@ class BaseVisDataset(Dataset):
 			w = n / (num_classes * np.maximum(counts, 1.0))
 
 		# optional normalization (keeps average weight ~1)
+		print("weights (before norm)")
+		print(w)
+		
 		w = w * (num_classes / w.sum())
 	
+		print("weights (after norm)")
+		print(w)
+		
 		return torch.tensor(w, dtype=torch.float32)
 		
 	def compute_ordinal_pos_weight(self, num_classes, id2target, eps=1e-12, clip_max=None, device=None):
