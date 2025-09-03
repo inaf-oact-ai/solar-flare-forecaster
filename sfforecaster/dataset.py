@@ -324,7 +324,7 @@ class BaseVisDataset(Dataset):
 		""" Load image metadata """
 		return self.datalist[idx]
 		
-	def compute_class_weights(self, num_classes, id2target, scheme="balanced"):
+	def compute_class_weights(self, num_classes, id2target, scheme="balanced", normalize=True):
 		""" Compute class weights from dataset """
     
 		# - Collect labels
@@ -348,13 +348,13 @@ class BaseVisDataset(Dataset):
 			w = n / (num_classes * np.maximum(counts, 1.0))
 
 		# optional normalization (keeps average weight ~1)
-		print("weights (before norm)")
+		print("weights")
 		print(w)
 		
-		w = w * (num_classes / w.sum())
-	
-		print("weights (after norm)")
-		print(w)
+		if normalize:
+			w = w * (num_classes / w.sum())
+			print("weights (after norm)")
+			print(w)
 		
 		return torch.tensor(w, dtype=torch.float32)
 		
@@ -407,7 +407,7 @@ class BaseVisDataset(Dataset):
 		return pw, counts
 		
 		
-	def compute_sample_weights(self, num_classes, id2target, scheme="balanced"):
+	def compute_sample_weights(self, num_classes, id2target, scheme="balanced", normalize=True):
 		"""
 			Returns a list of length len(train_ds) with per-example sampling weights.
 			Typically inverse frequency by class, normalized.
@@ -429,12 +429,14 @@ class BaseVisDataset(Dataset):
 		else:
 			class_w = n / (num_classes * np.maximum(counts, 1.0))
 
-		class_w = class_w * (num_classes / class_w.sum())
+		if normalize:
+			class_w = class_w * (num_classes / class_w.sum())
+			
 		sw = [class_w[y] for y in ys]
     
 		return sw
 		
-	def compute_sample_weights_from_flareid(self, num_classes=4, scheme="balanced"):
+	def compute_sample_weights_from_flareid(self, num_classes=4, scheme="balanced", normalize=True):
 		"""
 			Returns a list of length len(train_ds) with per-example sampling weights.
 			Typically inverse frequency by class, normalized.
@@ -456,7 +458,8 @@ class BaseVisDataset(Dataset):
 		else:
 			class_w = n / (num_classes * np.maximum(counts, 1.0))
 
-		class_w = class_w * (num_classes / class_w.sum())
+		if normalize:
+			class_w = class_w * (num_classes / class_w.sum())
 		sw = [class_w[y] for y in ys]
     
 		return sw	

@@ -159,6 +159,9 @@ def get_args():
 	parser.add_argument("--use_weighted_sampler", dest='use_weighted_sampler', action="store_true", default=False, help="Use a WeightedRandomSampler for training.")
 	parser.add_argument("--sample_weight_from_flareid", dest='sample_weight_from_flareid', action="store_true", default=False, help="Compute sample weights from flare id (mostly used for binary class).")
 	parser.add_argument("--weight_compute_mode", dest='weight_compute_mode', type=str, choices=["balanced", "inverse", "inverse_v2"], default="balanced", help="How to compute class/sample weights")
+	parser.add_argument('--normalize_weights', dest='normalize_weights', action='store_true', help="Enable normalization of class weights.")
+	parser.add_argument('--no_normalize_weights', dest='normalize_weights', action='store_false', help="Disable normalization of class weights.")
+	parser.set_defaults(normalize_weights=True)
 	
 	parser.add_argument("--loss_type", dest='loss_type', type=str, choices=["ce", "focal", "sol"], default="ce", help="Loss type: standard cross-entropy, focal loss or solar custom loss.")
 	parser.add_argument("--focal_gamma", dest='focal_gamma', type=float, default=2.0, help="Focal loss gamma (focusing parameter).")
@@ -995,7 +998,8 @@ def main():
 		class_weights = dataset.compute_class_weights(
 			num_classes=num_labels, 
 			id2target=id2target,
-			scheme=args.weight_compute_mode
+			scheme=args.weight_compute_mode,
+			normalize=args.normalize_weights
 		)
 		print("--> CLASS WEIGHTS")
 		print(class_weights)
@@ -1021,14 +1025,16 @@ def main():
 			logger.info("Computing sample weights from dataset flare_id data ...")
 			sample_weights = dataset.compute_sample_weights_from_flareid(
 				num_classes=4,
-				scheme=args.weight_compute_mode
+				scheme=args.weight_compute_mode,
+				normalize=args.normalize_weights
 			)
 		else:
 			logger.info("Computing sample weights from dataset target data ...")
 			sample_weights = dataset.compute_sample_weights(
 				num_classes=num_labels,
 				id2target=id2target,
-				scheme=args.weight_compute_mode
+				scheme=args.weight_compute_mode,
+				normalize=args.normalize_weights
 			)
 		
 	# Set focal loss pars
