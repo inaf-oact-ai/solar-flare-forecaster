@@ -158,6 +158,7 @@ def get_args():
 	parser.add_argument("--use_weighted_loss", dest='use_weighted_loss', action="store_true", default=False, help="Use class-weighted loss (CE or focal alpha).")
 	parser.add_argument("--use_weighted_sampler", dest='use_weighted_sampler', action="store_true", default=False, help="Use a WeightedRandomSampler for training.")
 	parser.add_argument("--sample_weight_from_flareid", dest='sample_weight_from_flareid', action="store_true", default=False, help="Compute sample weights from flare id (mostly used for binary class).")
+	parser.add_argument("--weight_compute_mode", dest='weight_compute_mode', type=str, choices=["balanced", "inverse"], default="balanced", help="How to compute class/sample weights")
 	
 	parser.add_argument("--loss_type", dest='loss_type', type=str, choices=["ce", "focal", "sol"], default="ce", help="Loss type: standard cross-entropy, focal loss or solar custom loss.")
 	parser.add_argument("--focal_gamma", dest='focal_gamma', type=float, default=2.0, help="Focal loss gamma (focusing parameter).")
@@ -994,7 +995,7 @@ def main():
 		class_weights = dataset.compute_class_weights(
 			num_classes=num_labels, 
 			id2target=id2target,
-			scheme="balanced"
+			scheme=args.weight_compute_mode
 		)
 		print("--> CLASS WEIGHTS")
 		print(class_weights)
@@ -1020,14 +1021,14 @@ def main():
 			logger.info("Computing sample weights from dataset flare_id data ...")
 			sample_weights = dataset.compute_sample_weights_from_flareid(
 				num_classes=4,
-				scheme="balanced"
+				scheme=args.weight_compute_mode
 			)
 		else:
 			logger.info("Computing sample weights from dataset target data ...")
 			sample_weights = dataset.compute_sample_weights(
 				num_classes=num_labels,
 				id2target=id2target,
-				scheme="balanced"
+				scheme=args.weight_compute_mode
 			)
 		
 	# Set focal loss pars
@@ -1064,6 +1065,10 @@ def main():
 		print("--> FOCAL ALPHA")
 		print(focal_alpha)
 		summarize_alpha(focal_alpha, counts)
+	
+	# - Debug printout	
+	print("id2label:", model.config.id2label)
+	print("label2id:", model.config.label2id)
 		
 	# - Set trainer
 	if args.use_custom_trainer:
