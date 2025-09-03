@@ -340,6 +340,8 @@ class BaseVisDataset(Dataset):
 
 		if scheme == "inverse":
 			w = 1.0 / np.maximum(counts, 1.0)
+		elif scheme == "inverse_v2":
+			w = np.max(counts)/counts
 		else:
 			# "balanced" like sklearn: n_samples / (n_classes * count_c)
 			n = counts.sum()
@@ -422,6 +424,8 @@ class BaseVisDataset(Dataset):
 
 		if scheme == "inverse":
 			class_w = 1.0 / np.maximum(counts, 1.0)
+		elif scheme == "inverse_v2":
+			class_w = np.max(counts)/counts
 		else:
 			class_w = n / (num_classes * np.maximum(counts, 1.0))
 
@@ -447,6 +451,8 @@ class BaseVisDataset(Dataset):
 
 		if scheme == "inverse":
 			class_w = 1.0 / np.maximum(counts, 1.0)
+		elif scheme == "inverse_v2":
+			class_w = np.max(counts)/counts
 		else:
 			class_w = n / (num_classes * np.maximum(counts, 1.0))
 
