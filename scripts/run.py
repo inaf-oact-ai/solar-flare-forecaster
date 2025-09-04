@@ -52,7 +52,7 @@ from sfforecaster.dataset import VideoDataset, ImgDataset, ImgStackDataset
 from sfforecaster.custom_transforms import FlippingTransform, Rotate90Transform
 from sfforecaster.custom_transforms import VideoFlipping, VideoResize, VideoNormalize, VideoRotate90 
 from sfforecaster.metrics import build_multi_label_metrics, build_single_label_metrics, build_ordinal_metrics
-from sfforecaster.trainer import AdvancedImbalanceTrainer
+from sfforecaster.trainer import CustomTrainer, TrainMetricsCallback
 from sfforecaster.trainer import VideoDataCollator, ImgDataCollator
 from sfforecaster.model import CoralOrdinalHead
 from sfforecaster.inference import coral_logits_to_class_probs, coral_decode_with_thresholds
@@ -1083,7 +1083,7 @@ def main():
 	# - Set trainer
 	if args.use_custom_trainer:
 		logger.info("Using custom class-weighted loss trainer ...")
-		trainer = AdvancedImbalanceTrainer(
+		trainer = CustomTrainer(
 			model=model,
 			args=training_opts,
 			train_dataset=dataset,
@@ -1107,6 +1107,9 @@ def main():
 			compute_train_metrics=args.compute_train_metrics,
 			verbose=args.verbose
 		)
+		
+		if args.compute_train_metrics:
+			trainer.add_callback(TrainMetricsCallback(trainer))
 		
 	else:
 		logger.info("Using standard trainer ...")

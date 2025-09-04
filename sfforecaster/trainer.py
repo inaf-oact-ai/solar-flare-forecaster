@@ -516,9 +516,9 @@ class ScoreOrientedLoss(nn.Module):
 		
 		
 ##########################################
-##    WEIGHTED-LOSS CUSTOM TRAINER
+##    CUSTOM TRAINER
 ##########################################
-class AdvancedImbalanceTrainer(Trainer):
+class CustomTrainer(Trainer):
 	""" Custom trainer implementing a weighted loss and dataset weighted resampling to tackle class imbalance """
     
 	def __init__(
@@ -762,15 +762,25 @@ class AdvancedImbalanceTrainer(Trainer):
 		# Log via Trainer's logger (goes to W&B if report_to includes "wandb")
 		self.log(metrics)
 		
-	# Hook: called by HF training loop
-	def on_epoch_begin(self):
-		super().on_epoch_begin()
-		print("Resetting train metrics buffers ...")
-		self._reset_train_buffers()
+		
+class TrainMetricsCallback(TrainerCallback):
+	"""
+		Hooks that DO get called: on_epoch_begin / on_epoch_end.
+		Works with any Trainer, but expects the methods we defined on CustomTrainer.
+	"""
+	def __init__(self, trainer: CustomTrainer):
+		super().__init__()
+		self.trainer = trainer
 
-	def on_epoch_end(self):
-		# compute & log train metrics using data collected during the epoch
-		print("Computing and logging train metrics ...")
-		self._compute_and_log_train_metrics()
-		super().on_epoch_end()
+	def on_epoch_begin(self, args, state, control, **kwargs):
+		if getattr(self.trainer, "compute_train_metrics", False):
+			print("Resetting train metrics buffers ...")
+			self.trainer._reset_train_buffers()
+
+	def on_epoch_end(self, args, state, control, **kwargs):
+		if getattr(self.trainer, "compute_train_metrics", False):
+			print("Computing and logging train metrics ...")
+			self.trainer._compute_and_log_train_metrics()
+		# No change to control flow
+		return control
 		
