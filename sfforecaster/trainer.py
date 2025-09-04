@@ -726,7 +726,11 @@ class AdvancedImbalanceTrainer(Trainer):
 	def _compute_and_log_train_metrics(self):
 		""" Compute train metrics and log them """
 		
-		if not self.compute_train_metrics or self.compute_metrics is None:
+		if not self.compute_train_metrics:
+			return
+			
+		if self.compute_metrics is None:
+			print("compute_metrics is None, no train metrics computed ...")
 			return
 
 		if len(self._train_logits) == 0 or len(self._train_labels) == 0:
@@ -761,10 +765,12 @@ class AdvancedImbalanceTrainer(Trainer):
 	# Hook: called by HF training loop
 	def on_epoch_begin(self):
 		super().on_epoch_begin()
+		print("Resetting train metrics buffers ...")
 		self._reset_train_buffers()
 
 	def on_epoch_end(self):
 		# compute & log train metrics using data collected during the epoch
+		print("Computing and logging train metrics ...")
 		self._compute_and_log_train_metrics()
 		super().on_epoch_end()
 		
