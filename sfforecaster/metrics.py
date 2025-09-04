@@ -611,33 +611,33 @@ def build_single_label_metrics(target_names):
 		
 		# - Trainer wants only the scalar metrics
 		metrics_scalar= {
-			"accuracy": metrics["accuracy"],
-			"precision": metrics["precision"],
-			"recall": metrics["recall"],
-			"f1score_weighted": metrics["f1score_weighted"],
-			"f1score_micro": metrics["f1score_micro"],
-			"f1score_macro": metrics["f1score_macro"],
-			"mcc": metrics["mcc"],
+			"accuracy": float(metrics["accuracy"]),
+			"precision": float(metrics["precision"]),
+			"recall": float(metrics["recall"]),
+			"f1score_weighted": float(metrics["f1score_weighted"]),
+			"f1score_micro": float(metrics["f1score_micro"]),
+			"f1score_macro": float(metrics["f1score_macro"]),
+			"mcc": float(metrics["mcc"]),
 		}
 		
 		# - Check if TP, FN etc are scalars
 		if np.isscalar(metrics["fp"]):
 			metrics_scalar.update(
 				{
-					"fp": metrics["fp"],
-					"fn": metrics["fn"],
-					"tp": metrics["tp"],
-					"tn": metrics["tn"],
-					"tpr": metrics["tpr"],
-					"tnr": metrics["tnr"],
-					"ppv": metrics["ppv"],
-					"npv": metrics["npv"],
-					"fpr": metrics["fpr"],
-					"fnr": metrics["fnr"],
-					"fdr": metrics["fdr"],
-					"tss": metrics["tss"],
-					"hss": metrics["hss"],
-					"gss": metrics["gss"],
+					"fp": int(metrics["fp"]),
+					"fn": int(metrics["fn"]),
+					"tp": int(metrics["tp"]),
+					"tn": int(metrics["tn"]),
+					"tpr": float(metrics["tpr"]),
+					"tnr": float(metrics["tnr"]),
+					"ppv": float(metrics["ppv"]),
+					"npv": float(metrics["npv"]),
+					"fpr": float(metrics["fpr"]),
+					"fnr": float(metrics["fnr"]),
+					"fdr": float(metrics["fdr"]),
+					"tss": float(metrics["tss"]),
+					"hss": float(metrics["hss"]),
+					"gss": float(metrics["gss"]),
 				}
 			)
 		
@@ -645,21 +645,21 @@ def build_single_label_metrics(target_names):
 		if "tpr_summary" in metrics:
 			metrics_scalar.update(
 				{
-					"tpr_macro": metrics["tpr_summary"]["macro"],
-					"tpr_weighted": metrics["tpr_summary"]["weighted"],
-					"tnr_macro": metrics["tnr_summary"]["macro"],
-					"tnr_weighted": metrics["tnr_summary"]["weighted"],
-					"hss_macro": metrics["hss_summary"]["macro"],
-					"tss_macro": metrics["tss_summary"]["macro"],
-					"gss_macro": metrics["gss_summary"]["macro"],
-					"hss_weighted": metrics["hss_summary"]["weighted"],
-					"tss_weighted": metrics["tss_summary"]["weighted"],
-					"gss_weighted": metrics["gss_summary"]["weighted"],
-					"tpr_micro": metrics["tpr_micro"],
-					"tnr_micro": metrics["tnr_micro"],
-					"hss_micro": metrics["hss_micro"],
-					"tss_micro": metrics["tss_micro"],
-					"gss_micro": metrics["gss_micro"],
+					"tpr_macro": float(metrics["tpr_summary"]["macro"]),
+					"tpr_weighted": float(metrics["tpr_summary"]["weighted"]),
+					"tnr_macro": float(metrics["tnr_summary"]["macro"]),
+					"tnr_weighted": float(metrics["tnr_summary"]["weighted"]),
+					"hss_macro": float(metrics["hss_summary"]["macro"]),
+					"tss_macro": float(metrics["tss_summary"]["macro"]),
+					"gss_macro": float(metrics["gss_summary"]["macro"]),
+					"hss_weighted": float(metrics["hss_summary"]["weighted"]),
+					"tss_weighted": float(metrics["tss_summary"]["weighted"]),
+					"gss_weighted": float(metrics["gss_summary"]["weighted"]),
+					"tpr_micro": float(metrics["tpr_micro"]),
+					"tnr_micro": float(metrics["tnr_micro"]),
+					"hss_micro": float(metrics["hss_micro"]),
+					"tss_micro": float(metrics["tss_micro"]),
+					"gss_micro": float(metrics["gss_micro"]),
 				}
 			)
 			
