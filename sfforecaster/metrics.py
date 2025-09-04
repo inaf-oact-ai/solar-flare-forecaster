@@ -642,6 +642,17 @@ def build_single_label_metrics(target_names):
 					"gss": float(metrics["gss"]),
 				}
 			)
+			
+		# - Check if TSS scan metrics are present
+		if "tss_best" in metrics:	
+			metrics_scalar.update(
+				{
+					"tss_best": float(metrics["tss_best"]),
+					"tss_best_thr": float(metrics["tss_best_thr"]),
+					"tss_best_tpr": float(metrics["tss_best_tpr"]),
+					"tss_best_tnr": float(metrics["tss_best_tnr"])
+				}
+			)
 		
 		# - Check if summary metrics are present (multiclass)
 		if "tpr_summary" in metrics:
