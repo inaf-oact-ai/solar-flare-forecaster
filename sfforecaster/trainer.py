@@ -667,6 +667,7 @@ class AdvancedImbalanceTrainer(Trainer):
 		# - Update train metric variables (if required to be computed)
 		if self.compute_train_metrics:
 			if logits is not None and labels is not None:
+				print("Updating train metric counters ...")
 				# Detach now to avoid holding graph; keep on device for cheap gather
 				self._train_logits.append(logits.detach())
 				self._train_labels.append(labels.detach())
@@ -724,10 +725,12 @@ class AdvancedImbalanceTrainer(Trainer):
 		
 	def _compute_and_log_train_metrics(self):
 		""" Compute train metrics and log them """
+		
 		if not self.compute_train_metrics or self.compute_metrics is None:
 			return
 
 		if len(self._train_logits) == 0 or len(self._train_labels) == 0:
+			print("WARN: train logits/labels empty, no train metrics computed ...")
 			return  # nothing collected (e.g., gradient_accum_only run)
 
 		# Concatenate per-step tensors
@@ -748,6 +751,9 @@ class AdvancedImbalanceTrainer(Trainer):
 
 		# Prefix keys to distinguish from eval metrics
 		metrics = {f"train/{k}": v for k, v in metrics.items()}
+		
+		print("--> train_metrics")
+		print(metrics)
 
 		# Log via Trainer's logger (goes to W&B if report_to includes "wandb")
 		self.log(metrics)
