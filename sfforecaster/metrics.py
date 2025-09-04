@@ -577,6 +577,8 @@ def single_label_metrics(predictions, labels, target_names=None):
 	
 	# - For binary class compute best TSS vs threshold
 	if binary_class:
+		print("Computing best TSS vs threshold ...")
+		
 		# - probs from logits already computed above
 		p_pos = probs[:, 1].numpy()          # assumes index 1 is positive (C+ or M+)
 		y_true_np = y_true
