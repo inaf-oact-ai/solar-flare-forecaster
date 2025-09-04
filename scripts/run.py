@@ -174,6 +174,8 @@ def get_args():
 		
 	parser.add_argument('-ordinal_thresholds', '--ordinal_thresholds', dest='ordinal_thresholds', required=False, type=list_of_floats, default=None, action='store', help='Sigmoid thresholds (e.g. [0.5,0.5,0.5]) for the K-1 flare classes. If None, 0.5 per class. (default=None)')
 		
+	parser.add_argument("--compute_train_metrics", dest='compute_train_metrics', action="store_true", default=False, help="Compute and log train metrics during training.")
+		
 	# - Run options
 	parser.add_argument('-device', '--device', dest='device', required=False, type=str, default="cuda:0", action='store',help='Device identifier')
 	parser.add_argument('-runname', '--runname', dest='runname', required=False, type=str, default="llava_1.5_radio", action='store',help='Run name')
@@ -904,6 +906,8 @@ def main():
 	print(num_labels)
 	print("nclasses")
 	print(nclasses)
+	print("label_names")
+	print(label_names)
 	
 	#===========================
 	#==   LOAD MODEL
@@ -1100,6 +1104,7 @@ def main():
 			sol_add_constant=args.sol_add_constant,
 			ordinal=bool(args.ordinal),
 			ordinal_pos_weights=ordinal_pos_weights,
+			compute_train_metrics=args.compute_train_metrics,
 			verbose=args.verbose
 		)
 		

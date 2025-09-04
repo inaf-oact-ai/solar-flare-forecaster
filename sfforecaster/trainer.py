@@ -536,6 +536,7 @@ class AdvancedImbalanceTrainer(Trainer):
 		sol_add_constant=False,
 		ordinal=False,
 		ordinal_pos_weights=None,
+		compute_train_metrics=False,
 		verbose=False,
 		**kwargs
 	):
@@ -553,6 +554,8 @@ class AdvancedImbalanceTrainer(Trainer):
 		self.ordinal= ordinal
 		self.ordinal_pos_weights= ordinal_pos_weights
 		self.verbose= verbose
+		self.compute_train_metrics = compute_train_metrics
+		self._reset_train_buffers()
 
 		# - Build the loss criterion
 		if self.multilabel:
@@ -660,6 +663,14 @@ class AdvancedImbalanceTrainer(Trainer):
 			print(labels)
 			print("loss")
 			print(loss)
+			
+		# - Update train metric variables (if required to be computed)
+		if self.compute_train_metrics:
+			if logits is not None and labels is not None:
+				# Detach now to avoid holding graph; keep on device for cheap gather
+				self._train_logits.append(logits.detach())
+				self._train_labels.append(labels.detach())
+
 
 		return (loss, outputs) if return_outputs else loss
 
@@ -687,4 +698,67 @@ class AdvancedImbalanceTrainer(Trainer):
 			pin_memory=self.args.dataloader_pin_memory,
 			drop_last=self.args.dataloader_drop_last,
 		)
+	
+	def _reset_train_buffers(self):
+		self._train_logits = []
+		self._train_labels = []
+		
+	def _extract_labels(self, inputs: Dict[str, Any]) -> Optional[torch.Tensor]:
+		# common label keys: "labels" or "label"
+		for k in ("labels", "label"):
+			if k in inputs and inputs[k] is not None:
+				return inputs[k]
+		return None
+		
+	def _gather_for_metrics(self, t: torch.Tensor) -> torch.Tensor:
+		"""
+			Gather a tensor across processes for metrics. Uses Accelerate utilities
+			when available; falls back to identity in single-process.
+		"""
+		if hasattr(self, "accelerator") and self.accelerator is not None:
+			# Handles uneven batch sizes & different shapes across steps
+			return self.accelerator.gather_for_metrics(t)
+		
+		# Single-process fallback
+		return t
+		
+	def _compute_and_log_train_metrics(self):
+		""" Compute train metrics and log them """
+		if not self.compute_train_metrics or self.compute_metrics is None:
+			return
+
+		if len(self._train_logits) == 0 or len(self._train_labels) == 0:
+			return  # nothing collected (e.g., gradient_accum_only run)
+
+		# Concatenate per-step tensors
+		logits = torch.cat(self._train_logits, dim=0)
+		labels = torch.cat(self._train_labels, dim=0)
+
+		# Gather across processes for correct global metrics
+		logits = self._gather_for_metrics(logits)
+		labels = self._gather_for_metrics(labels)
+
+		# Move to CPU numpy for compute_metrics
+		preds_np = logits.cpu().numpy()
+		labels_np = labels.cpu().numpy()
+
+		# Use the same compute_metrics you pass to Trainer
+		ep = EvalPrediction(predictions=preds_np, label_ids=labels_np)
+		metrics = self.compute_metrics(ep)  # user-defined
+
+		# Prefix keys to distinguish from eval metrics
+		metrics = {f"train/{k}": v for k, v in metrics.items()}
+
+		# Log via Trainer's logger (goes to W&B if report_to includes "wandb")
+		self.log(metrics)
+		
+	# Hook: called by HF training loop
+	def on_epoch_begin(self):
+		super().on_epoch_begin()
+		self._reset_train_buffers()
+
+	def on_epoch_end(self):
+		# compute & log train metrics using data collected during the epoch
+		self._compute_and_log_train_metrics()
+		super().on_epoch_end()
 		
