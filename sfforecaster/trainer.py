@@ -754,7 +754,7 @@ class CustomTrainer(Trainer):
 		metrics = self.compute_metrics(ep)  # user-defined
 
 		# Prefix keys to distinguish from eval metrics
-		metrics = {f"train/{k}": v for k, v in metrics.items()}
+		#metrics = {f"train/{k}": v for k, v in metrics.items()}
 		
 		print("--> train_metrics")
 		print(metrics)
