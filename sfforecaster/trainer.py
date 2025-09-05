@@ -667,7 +667,7 @@ class CustomTrainer(Trainer):
 		# - Update train metric variables (if required to be computed)
 		if self.compute_train_metrics:
 			if logits is not None and labels is not None:
-				print("Updating train metric counters ...")
+				#print("Updating train metric counters ...")
 				# Detach now to avoid holding graph; keep on device for cheap gather
 				self._train_logits.append(logits.detach())
 				self._train_labels.append(labels.detach())
@@ -774,12 +774,12 @@ class TrainMetricsCallback(TrainerCallback):
 
 	def on_epoch_begin(self, args, state, control, **kwargs):
 		if getattr(self.trainer, "compute_train_metrics", False):
-			print("Resetting train metrics buffers ...")
+			#print("Resetting train metrics buffers ...")
 			self.trainer._reset_train_buffers()
 
 	def on_epoch_end(self, args, state, control, **kwargs):
 		if getattr(self.trainer, "compute_train_metrics", False):
-			print("Computing and logging train metrics ...")
+			#print("Computing and logging train metrics ...")
 			self.trainer._compute_and_log_train_metrics()
 		# No change to control flow
 		return control
