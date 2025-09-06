@@ -657,7 +657,10 @@ def load_training_opts(args):
 		#disable_tqdm=True,
 		run_name=args.runname,
     #report_to="wandb",  # enable logging to W&B
-    report_to=args.report_to
+    report_to=args.report_to,
+		dataloader_num_workers=0,
+		dataloader_pin_memory=False,
+		dataloader_persistent_workers=False
 	)
 	
 	print("--> training options")
