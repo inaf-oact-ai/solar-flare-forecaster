@@ -153,6 +153,9 @@ def get_args():
 	parser.add_argument('--drop_last', dest='drop_last', action='store_true',help='Drop last incomplete batch (default=false)')	
 	parser.set_defaults(drop_last=False)
 	
+	parser.add_argument('-metric_for_best_model', '--metric_for_best_model', dest='metric_for_best_model', required=False, type=str, default='eval/tss', action='store', help='Metric used to select the best model (default=eval/tss)')
+	
+	
 	# - Imbalanced trainer options
 	parser.add_argument("--use_custom_trainer", dest='use_custom_trainer', action="store_true", default=False, help="Use custom trainer (for imbalance).")
 	parser.add_argument("--use_weighted_loss", dest='use_weighted_loss', action="store_true", default=False, help="Use class-weighted loss (CE or focal alpha).")
@@ -191,9 +194,9 @@ def get_args():
 
 	# - Output options
 	parser.add_argument('-outdir','--outdir', dest='outdir', required=False, default="", type=str, help='Output data dir') 
-	parser.add_argument('--save_model_every_epoch', dest='save_model_every_epoch', action='store_true', help='Save model every epoch (default=false)')	
-	parser.set_defaults(save_model_every_epoch=False)
-	parser.add_argument('-max_checkpoints', '--max_checkpoints', dest='max_checkpoints', required=False, type=int, default=1, action='store',help='Max number of saved checkpoints (default=1)')
+	#parser.add_argument('--save_model_every_epoch', dest='save_model_every_epoch', action='store_true', help='Save model every epoch (default=false)')	
+	#parser.set_defaults(save_model_every_epoch=False)
+	parser.add_argument('-max_checkpoints', '--max_checkpoints', dest='max_checkpoints', required=False, type=int, default=2, action='store',help='Max number of saved checkpoints (default=2)')
 	parser.add_argument('-outfile','--outfile', dest='outfile', required=False, default="classifier_results.json", type=str, help='Output file with saved inference results') 
 	
 	args = parser.parse_args()	
@@ -604,14 +607,19 @@ def load_training_opts(args):
 			
 	log_dir= os.path.join(output_dir, "logs/")
 	
-	# - Set eval strategy
+	# - Set eval & save strategy
 	eval_strategy= "no"
+	load_best_model_at_end= False
+	save_strategy= "no"
 	if args.datalist_cv!="":
+		load_best_model_at_end= True
 		if args.run_eval_on_step:
 			eval_strategy= "steps"
+			save_strategy= "steps"
 		else:
 			eval_strategy= "epoch"
-	
+			save_strategy= "epoch"
+			
 	# - Set training options
 	logger.info("Set model options ...")
 	training_opts= transformers.TrainingArguments(
@@ -632,10 +640,14 @@ def load_training_opts(args):
 		eval_strategy=eval_strategy,
 		eval_on_start=args.run_eval_on_start,
 		eval_steps=args.logging_steps,
+		metric_for_best_model=args.metric_for_best_model,
+		greater_is_better=True,
+		load_best_model_at_end=load_best_model_at_end,
 		##batch_eval_metrics=False,
 		##label_names=label_names,# DO NOT USE (see https://discuss.huggingface.co/t/why-do-i-get-no-validation-loss-and-why-are-metrics-not-calculated/32373)
-		save_strategy="epoch" if args.save_model_every_epoch else "no",
-		save_total_limit=args.max_checkpoints,
+		#save_strategy="epoch" if args.save_model_every_epoch else "no",
+		save_strategy=save_strategy,
+		save_total_limit=args.max_checkpoints, # at most keep only BEST + LAST
 		logging_dir = log_dir,
 		log_level="debug",
 		logging_strategy="steps",
@@ -839,10 +851,39 @@ def run_train(
 	#train_result = trainer.train(resume_from_checkpoint=checkpoint)
 	train_result = trainer.train()
 	
-	# - Save model
-	logger.info("Saving trained model ...")	
-	trainer.save_model()
+	# - Save final model explicitly (if save_strategy is set to no)
+	if trainer.args.save_strategy == "no":
+    logger.info("Saving trained model ...")	
+		trainer.save_model()
+		#trainer.save_model(trainer.args.output_dir)
+		
+	# - Always simlink/copy last remaining checkpoint
+	out_dir = Path(trainer.args.output_dir)
+	last_ckpt = find_last_checkpoint(out_dir)
+	if last_ckpt is None:
+		logger.warning("⚠️ No checkpoints found under output_dir; nothing to link as 'final'. Did you set save_strategy='epoch'?")
+	else:
+		make_link_or_copy(last_ckpt, out_dir / "final")
 
+	# - Save best model
+	#   NB: only if a validation run occurred and a best checkpoint exists
+	try:
+		did_validation = (args.datalist_cv != "")
+	except NameError:
+		# If 'args' is not in scope, fall back to Trainer flags
+		did_validation = bool(getattr(trainer.args, "load_best_model_at_end", False))
+
+	best_ckpt_path = getattr(trainer.state, "best_model_checkpoint", None)
+
+	if did_validation and best_ckpt_path:
+		best_ckpt = Path(best_ckpt_path)
+		if best_ckpt.exists():
+			make_link_or_copy(best_ckpt, out_dir / "best")
+		else:
+			logger.warning(f"⚠️ Best checkpoint reported but not found on disk: {best_ckpt}")
+	else:
+		logger.info("ℹ️ No validation detected or no best checkpoint available; skipping 'best' link.")
+	
 	# - Save metrics
 	logger.info("Saving train metrics ...")        
 	trainer.log_metrics("train", train_result.metrics)

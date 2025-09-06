@@ -20,6 +20,9 @@ import math
 import logging
 import io
 import re
+from pathlib import Path
+import shutil
+import stat
 
 ## COMMAND-LINE ARG MODULES
 import getopt
@@ -59,6 +62,44 @@ def extract_layer_id(name: str) -> int:
 		logger.warning(f"No '.layers.<id>.' pattern found in: {name}")
 		return -1
 	return int(match.group(1))
+	
+def safe_remove_path(p: Path):
+	"""Remove existing symlink or directory/file at p (if present)."""
+	if not p.exists() and not p.is_symlink():
+		return
+	try:
+		if p.is_symlink() or p.is_file():
+			p.unlink(missing_ok=True)
+		elif p.is_dir():
+			shutil.rmtree(p)
+	except Exception as e:
+		logger.warning(f"⚠️ Could not remove {p}: {e}")
+
+def make_link_or_copy(src: Path, dst: Path):
+	"""Try to symlink; if it fails (e.g., perms), copy instead."""
+	safe_remove_path(dst)
+	try:
+		os.symlink(src, dst, target_is_directory=True)
+		logger.info(f"👉 Symlink created: {dst} -> {src}")
+	except Exception as e:
+		logger.warning(f"⚠️ Symlink failed ({e}); copying instead (uses disk space).")
+		shutil.copytree(src, dst)
+		logger.info(f"📁 Copied: {dst} (from {src})")
+
+def find_last_checkpoint(root: Path) -> Path | None:
+	"""Pick the latest checkpoint-* folder. Prefer the largest step number; fallback to mtime."""
+	ckpts = [p for p in root.glob("checkpoint-*") if p.is_dir()]
+	if not ckpts:
+		return None
+	def step_num(p: Path):
+		m = re.search(r"checkpoint-(\d+)", p.name)
+		return int(m.group(1)) if m else -1
+	# Prefer by step number if available
+	ckpts_by_step = sorted(ckpts, key=step_num)
+	if step_num(ckpts_by_step[-1]) >= 0:
+		return ckpts_by_step[-1]
+	# Fallback by modification time
+	return max(ckpts, key=lambda p: p.stat().st_mtime)
 
 ##########################
 ##    DATA UTILS
