@@ -153,7 +153,7 @@ def get_args():
 	parser.add_argument('--drop_last', dest='drop_last', action='store_true',help='Drop last incomplete batch (default=false)')	
 	parser.set_defaults(drop_last=False)
 	
-	parser.add_argument('-metric_for_best_model', '--metric_for_best_model', dest='metric_for_best_model', required=False, type=str, default='eval/tss', action='store', help='Metric used to select the best model (default=eval/tss)')
+	parser.add_argument('-metric_for_best_model', '--metric_for_best_model', dest='metric_for_best_model', required=False, type=str, default='tss', action='store', help='Metric used to select the best model (default=eval/tss)')
 	
 	
 	# - Imbalanced trainer options
