@@ -853,7 +853,7 @@ def run_train(
 	
 	# - Save final model explicitly (if save_strategy is set to no)
 	if trainer.args.save_strategy == "no":
-    logger.info("Saving trained model ...")	
+		logger.info("Saving trained model ...")	
 		trainer.save_model()
 		#trainer.save_model(trainer.args.output_dir)
 		
