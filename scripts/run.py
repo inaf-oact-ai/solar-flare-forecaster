@@ -379,10 +379,19 @@ def load_model(
 def freeze_model(model, args):
 	""" Freeze certain part of the model """
 	
+	# - Set encoder model name
+	if args.videoloader:
+		encoder_name= "encoder"
+		layer_search_pattern= "layer"
+	else:
+		encoder_name= "vision_model.encoder"
+		layer_search_pattern= "layers"
+	
+	# - Freeze layers
 	logger.info("Freezing model base layers ...")
 	for name, param in model.base_model.named_parameters():	
-		if name.startswith("vision_model.encoder"):
-			layer_index= extract_layer_id(name)
+		if name.startswith(encoder_name):
+			layer_index= extract_layer_id(name, layer_search_pattern)
 			if args.max_freeze_layer_id==-1 or (args.max_freeze_layer_id>=0 and layer_index!=-1 and layer_index<args.max_freeze_layer_id):
 				param.requires_grad = False
 		
