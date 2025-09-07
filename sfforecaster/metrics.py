@@ -278,7 +278,7 @@ def monotonicity_violations(logits_t: torch.Tensor) -> dict:
 	mag = (-torch.minimum(diffs, torch.zeros_like(diffs))).mean().item()
 	return {"mvr": rate, "mvm": mag}  # rate, mean violation magnitude
 
-def _expected_confusion_uniform(y_true_b: torch.Tensor, p_pos_b: torch.Tensor):
+def expected_confusion_uniform(y_true_b: torch.Tensor, p_pos_b: torch.Tensor):
     """
     Expected confusion terms under the uniform threshold prior (F(p)=p).
     y_true_b: (B,) in {0,1} (float/int)
