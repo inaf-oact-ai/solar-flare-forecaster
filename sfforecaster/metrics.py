@@ -278,6 +278,60 @@ def monotonicity_violations(logits_t: torch.Tensor) -> dict:
 	mag = (-torch.minimum(diffs, torch.zeros_like(diffs))).mean().item()
 	return {"mvr": rate, "mvm": mag}  # rate, mean violation magnitude
 
+def _expected_confusion_uniform(y_true_b: torch.Tensor, p_pos_b: torch.Tensor):
+    """
+    Expected confusion terms under the uniform threshold prior (F(p)=p).
+    y_true_b: (B,) in {0,1} (float/int)
+    p_pos_b : (B,) in [0,1] probability of the positive class
+    Returns TN, FP, FN, TP as floats.
+    """
+    y = y_true_b.float()
+    Fp = p_pos_b.clamp(0.0, 1.0)
+    TN = ((1.0 - y) * (1.0 - Fp)).sum().item()
+    TP = (y * Fp).sum().item()
+    FP = ((1.0 - y) * Fp).sum().item()
+    FN = (y * (1.0 - Fp)).sum().item()
+    return TN, FP, FN, TP
+
+def tss_from_confusion(TN, FP, FN, TP, eps=1e-12):
+	rec_den = TP + FN
+	spe_den = TN + FP
+	rec = (TP / (rec_den + eps)) if rec_den > 0 else 0.0
+	spe = (TN / (spe_den + eps)) if spe_den > 0 else 0.0
+	return rec + spe - 1.0
+
+def tss_expected_from_probs(probs: torch.Tensor, y_idx: torch.Tensor, mode: str = "average"):
+	"""
+		Multiclass expected TSS (SOL-style, uniform prior).
+			probs: (B, C) softmax probabilities
+			y_idx: (B,) int class indices
+			mode : "average" or "weighted" (weights=#negatives per class in batch)
+		Returns scalar float.
+	"""
+	B, C = probs.shape
+	# one-hot without breaking graph (we won't backprop here anyway)
+	y_onehot = torch.zeros_like(probs).scatter_(1, y_idx.view(-1, 1), 1.0)
+
+	scores = []
+	weights = []
+	for j in range(C):
+		p_j = probs[:, j]          # (B,)
+		y_j = y_onehot[:, j]       # (B,)
+		TN, FP, FN, TP = expected_confusion_uniform(y_j, p_j)
+		s_j = tss_from_confusion(TN, FP, FN, TP)
+		scores.append(s_j)
+		# weight by #negatives like your SOL "weighted" option
+		n_neg = float(max(1.0, (y_j.shape[0] - y_j.sum()).item()))
+		weights.append(n_neg)
+
+	scores = np.array(scores, dtype=np.float64)
+	weights = np.array(weights, dtype=np.float64)
+
+	if mode.lower() == "weighted":
+		return float((scores * weights).sum() / (weights.sum() + 1e-12))
+
+	return float(scores.mean())
+
 
 ###########################################
 ##   MULTI-LABEL CLASS METRICS
@@ -518,6 +572,11 @@ def single_label_metrics(predictions, labels, target_names=None):
 		# - Compute global metrics (as done in other papers)
 		metrics_micro= compute_micro_metrics_from_confusion_matrix(cm)
 		
+	# - Compute SOL-style expected TSS (matches ScoreOrientedLoss) ---
+	probs_t = torch.as_tensor(probs)                 # (B, C)
+	y_idx_t = torch.as_tensor(y_true).long().view(-1)
+	tss_expected_avg = tss_expected_from_probs(probs_t, y_idx_t, mode="average")
+	tss_expected_w   = tss_expected_from_probs(probs_t, y_idx_t, mode="weighted")
 	
 	# - Return as dictionary
 	metrics = {
@@ -546,7 +605,9 @@ def single_label_metrics(predictions, labels, target_names=None):
 		'tss': TSS,
 		'hss': HSS,
 		'gss': GSS,
-		'mcc': MCC_coeff
+		'mcc': MCC_coeff,
+		'tss_exp_avg': tss_expected_avg,
+		'tss_exp_weighted': tss_expected_w
 	}
 	
 	if not binary_class:
@@ -651,6 +712,15 @@ def build_single_label_metrics(target_names):
 					"tss_best_thr": float(metrics["tss_best_thr"]),
 					"tss_best_tpr": float(metrics["tss_best_tpr"]),
 					"tss_best_tnr": float(metrics["tss_best_tnr"])
+				}
+			)
+			
+		# - Check if TSS expected metrics are present
+		if "tss_exp_avg" in metrics:
+			metrics_scalar.update(
+				{
+					"tss_exp_avg": float(metrics["tss_exp_avg"]),
+					"tss_exp_weighted": float(metrics["tss_exp_weighted"])
 				}
 			)
 		
