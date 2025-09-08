@@ -1146,44 +1146,55 @@ def main():
 				normalize=args.normalize_weights
 			)
 			
+		print("--> SAMPLE WEIGHTS")
+		print(sample_weights)
+			
 	# - Compute binary weights?
 	class_weights_binary= None
 	sample_weights_binary= None
 	if args.binary:
 		logger.info("Computing binary class/sample weights from dataset ...")
 		stats= dataset.compute_binary_class_weights(id2target, positive_label=1, laplace=1.0)
-		class_weights_binary= stats["pos_weight_bce"]    # tensor([N_neg/N_pos])
-		sample_weights_binary = stats["sample_weights"] 
+		if args.use_weighted_loss: 
+			class_weights_binary= stats["pos_weight_bce"]    # tensor([N_neg/N_pos])
+			
+			print("--> BINARY CLASS WEIGHTS")
+			print(class_weights_binary)
+		
+		if args.use_weighted_sampler:
+			sample_weights_binary = stats["sample_weights"]
+			
+			print("--> BINARY SAMPLE WEIGHTS")
+			print(sample_weights_binary)
 		
 	# Set focal loss pars
 	#   - For focal alpha in multiclass, you can re-use class_weights
-	#   - Often alpha ~ class_weights (normalized); you can also pass a float.
-	if args.set_focal_alpha_to_mild_estimate:
-		logger.info("Setting focal alpha to mild estimate ...")
-		focal_alpha, counts= dataset.compute_mild_focal_alpha_from_dataset(
-    	num_classes=4 if args.sample_weight_from_flareid else num_labels,
-    	id2target=id2target,
-			exponent=0.5,
-			cap_ratio=10.0,
-			device="cuda" if torch.cuda.is_available() else "cpu"
-		)
-	else:
-		logger.info("Setting focal alpha to class_weights if not None ...")
-		counts= None
-		focal_alpha = class_weights if args.loss_type == "focal" else None	
-
-	def summarize_alpha(alpha_t, counts=None):
-		if alpha_t is None:
-			print("Focal alpha: None")
-		else:
-			alpha = alpha_t.detach().cpu().numpy()
-			print("Focal alpha  :", np.round(alpha, 4).tolist(), " (mean=", round(alpha.mean(), 4), ", median=", round(np.median(alpha), 4), ")")
-			
-		if counts is not None:
-			print("Class counts :", counts.tolist())
-		
-	
+	#   - Often alpha ~ class_weights (normalized); you can also pass a float
 	if args.loss_type=="focal":
+		if args.set_focal_alpha_to_mild_estimate:
+			logger.info("Setting focal alpha to mild estimate ...")
+			focal_alpha, counts= dataset.compute_mild_focal_alpha_from_dataset(
+    		num_classes=4 if args.sample_weight_from_flareid else num_labels,
+    		id2target=id2target,
+				exponent=0.5,
+				cap_ratio=10.0,
+				device="cuda" if torch.cuda.is_available() else "cpu"
+			)
+		else:
+			logger.info("Setting focal alpha to class_weights if not None ...")
+			counts= None
+			focal_alpha = class_weights if args.loss_type == "focal" else None	
+
+		def summarize_alpha(alpha_t, counts=None):
+			if alpha_t is None:
+				print("Focal alpha: None")
+			else:
+				alpha = alpha_t.detach().cpu().numpy()
+				print("Focal alpha  :", np.round(alpha, 4).tolist(), " (mean=", round(alpha.mean(), 4), ", median=", round(np.median(alpha), 4), ")")
+			
+			if counts is not None:
+				print("Class counts :", counts.tolist())
+		
 		print("--> FOCAL GAMMA")
 		print(args.focal_gamma)
 		print("--> FOCAL ALPHA")
