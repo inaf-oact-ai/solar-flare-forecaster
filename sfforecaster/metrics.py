@@ -10,6 +10,7 @@ import sys
 import os
 import random
 import numpy as np
+import re
 
 # - SKLEARN
 from sklearn import metrics
@@ -332,7 +333,10 @@ def tss_expected_from_probs(probs: torch.Tensor, y_idx: torch.Tensor, mode: str 
 
 	return float(scores.mean())
 
-
+def safe_key(name):
+	# turn labels like "C+" / "M+" into log-safe keys: "C_" / "M_"
+	return re.sub(r"[^A-Za-z0-9_]+", "_", str(name))
+    
 ###########################################
 ##   MULTI-LABEL CLASS METRICS
 ###########################################
@@ -578,6 +582,8 @@ def single_label_metrics(predictions, labels, target_names=None):
 	tss_expected_avg = tss_expected_from_probs(probs_t, y_idx_t, mode="average")
 	tss_expected_w   = tss_expected_from_probs(probs_t, y_idx_t, mode="weighted")
 	
+		
+	
 	# - Return as dictionary
 	metrics = {
 		'class_names': class_names,
@@ -652,6 +658,32 @@ def single_label_metrics(predictions, labels, target_names=None):
 			"tss_best_tpr": best["tpr"],
 			"tss_best_tnr": best["tnr"],
 		})
+		
+		# - Compute individual class metrics for the binary case
+		# class1 = "positive" (the second label in label_indices / confusion matrix)
+		prec_pos = TP / (TP + FP + eps)
+		rec_pos  = TP / (TP + FN + eps)
+		f1_pos   = 2 * (prec_pos * rec_pos) / (prec_pos + rec_pos + eps)
+
+		# class0 = "negative" as positive (swap roles)
+		prec_neg = TN / (TN + FN + eps)
+		rec_neg  = TN / (TN + FP + eps)
+		f1_neg   = 2 * (prec_neg * rec_neg) / (prec_neg + rec_neg + eps)
+
+		# --- Per-class TSS (symmetric in binary, both equal the global TSS) ---
+		tss_pos = TPR + TNR - 1.0
+		tss_neg = TNR + TPR - 1.0  # equals tss_pos
+
+		# names in the same order used to build the confusion matrix
+		#name_neg = class_names[0]
+		#name_pos = class_names[1]
+	
+		metrics.update({
+			"f1_neg": float(f1_neg),
+			"f1_pos": float(f1_pos),
+			"tss_neg": float(tss_neg),
+			"tss_pos": float(tss_pos),
+		})
 	
 	print("--> metrics")
 	print(metrics)
@@ -714,6 +746,17 @@ def build_single_label_metrics(target_names):
 					"tss_best_tnr": float(metrics["tss_best_tnr"])
 				}
 			)
+			
+		# - Check if binary TSS/F1 per individual classes are present
+		if "tss_pos" in metrics:
+			metrics_scalar.update(
+				{
+					"f1_neg": float(metrics["f1_neg"]),
+					"f1_pos": float(metrics["f1_pos"]),
+					"tss_neg": float(metrics["tss_neg"]),
+					"tss_pos": float(metrics["tss_pos"]),
+				}
+			)	
 			
 		# - Check if TSS expected metrics are present
 		if "tss_exp_avg" in metrics:
