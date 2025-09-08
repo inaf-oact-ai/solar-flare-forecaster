@@ -725,15 +725,17 @@ class CustomTrainer(Trainer):
 		""" Get train dataloader with resampling """
 		
 		sample_weights= self.sample_weights
+		sample_weights_type= "multiclass"
 		if self.is_binary_single_logit:
 			sample_weights= self.binary_sample_weights
+			sample_weights_type= "binary"
 		
 		if sample_weights is None:
 			logger.info("No sample weights given, returning standard train dataloader ...")
 			return super().get_train_dataloader()
 
 		# - Weighted sampler (per-example) — replacement=True is standard here
-		logger.info("Creating weighted random sampler ...")
+		logger.info(f"Creating weighted random sampler with {sample_weights_type} sample weights ...")
 		sampler = WeightedRandomSampler(
 			weights=sample_weights,
 			num_samples=len(sample_weights),
