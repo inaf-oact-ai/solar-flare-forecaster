@@ -499,8 +499,10 @@ class ScoreOrientedLoss(nn.Module):
 		C = logits.shape[-1] if logits.ndim == 2 else 1
 		
 		if C == 1: # binary
+			print(f"Computing binary score (C={C}, logits.ndim={logits.ndim}, logits.shape[-1]={logits.shape[-1]}) ...")
 			score= self._compute_binary_score(logits, labels)
 		else:
+			print(f"Computing multiclass score (C={C}, logits.ndim={logits.ndim}, logits.shape[-1]={logits.shape[-1]})) ...")
 			score= self._compute_multiclass_score(logits, labels)
 			
 		# - Compute final loss
