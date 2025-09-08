@@ -315,7 +315,7 @@ def load_image_model(
 	if args.binary:
 		# Replace the head with 1 logit
 		in_features = model.classifier.in_features
-		model.classifier = nn.Linear(in_features, 1)
+		model.classifier = torch.nn.Linear(in_features, 1)
 		model.config.num_labels = 1  # avoid confusion; we’ll provide our own loss
 		model.config.problem_type = None  # don't let HF pick MSE; we handle loss in Trainer		
 			
@@ -377,7 +377,7 @@ def load_video_model(
 	#=============================	
 	if args.binary:
 		in_features = model.classifier.in_features
-		model.classifier = nn.Linear(in_features, 1)
+		model.classifier = torch.nn.Linear(in_features, 1)
 		model.config.num_labels = 1
 		model.config.problem_type = None
 
