@@ -764,7 +764,7 @@ def build_single_label_metrics(target_names):
 				{
 					"tss_exp_avg": float(metrics["tss_exp_avg"]),
 					"tss_exp_weighted": float(metrics["tss_exp_weighted"]),
-					"sol_loss_global": = float(-metrics["tss_exp_avg"])
+					"sol_loss_global": float(-metrics["tss_exp_avg"])
 				}
 			)
 		
