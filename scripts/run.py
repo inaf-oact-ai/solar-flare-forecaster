@@ -1170,6 +1170,7 @@ def main():
 	# Set focal loss pars
 	#   - For focal alpha in multiclass, you can re-use class_weights
 	#   - Often alpha ~ class_weights (normalized); you can also pass a float
+	focal_alpha= None
 	if args.loss_type=="focal":
 		if args.set_focal_alpha_to_mild_estimate:
 			logger.info("Setting focal alpha to mild estimate ...")
