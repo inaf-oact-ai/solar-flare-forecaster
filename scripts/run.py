@@ -149,6 +149,7 @@ def get_args():
 	#parser.add_argument('-min_lr', '--min_lr', dest='min_lr', required=False, type=float, default=1e-6, action='store',help='Learning rate min used in cosine_with_min_lr (default=1.e-6)')
 	parser.add_argument('-warmup_ratio', '--warmup_ratio', dest='warmup_ratio', required=False, type=float, default=0.2, action='store',help='Warmup ratio par (default=0.2)')
 	parser.add_argument('-batch_size', '--batch_size', dest='batch_size', required=False, type=int, default=8, action='store',help='Batch size used in training (default=8)')
+	parser.add_argument('-batch_size_eval', '--batch_size_eval', dest='batch_size_eval', required=False, type=int, default=None, action='store',help='Batch size used for evaluation. If None set equal to train batch size (default=None)')
 	
 	parser.add_argument('--drop_last', dest='drop_last', action='store_true',help='Drop last incomplete batch (default=false)')	
 	parser.set_defaults(drop_last=False)
@@ -620,6 +621,7 @@ def load_training_opts(args):
 	eval_strategy= "no"
 	load_best_model_at_end= False
 	save_strategy= "no"
+	batch_size_eval= args.batch_size if args.batch_size_eval is None else args.batch_size_eval
 	if args.datalist_cv!="":
 		load_best_model_at_end= True
 		if args.run_eval_on_step:
@@ -643,7 +645,7 @@ def load_training_opts(args):
 		warmup_ratio=args.warmup_ratio,
 		#warmup_steps=num_warmup_steps,
 		per_device_train_batch_size=args.batch_size,
-		per_device_eval_batch_size=args.batch_size,
+		per_device_eval_batch_size=batch_size_eval,
 		gradient_accumulation_steps=args.gradient_accumulation_steps,
 		dataloader_drop_last= args.drop_last,
 		eval_strategy=eval_strategy,
