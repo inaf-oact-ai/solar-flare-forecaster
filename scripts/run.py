@@ -262,13 +262,20 @@ def load_image_model(
 	#===================================
 	# - Load model
 	if args.vitloader:
-		config= ViTConfig.from_pretrained(
-			args.model,
-			problem_type="single_label_classification", 
-			id2label=id2label, 
-			label2id=label2id,
-			num_labels=num_labels
-		)
+		if args.binary:
+			config= ViTConfig.from_pretrained(
+				args.model,
+				problem_type=None, 
+				num_labels=1
+			)
+		else:
+			config= ViTConfig.from_pretrained(
+				args.model,
+				problem_type="single_label_classification", 
+				id2label=id2label, 
+				label2id=label2id,
+				num_labels=num_labels
+			)
 		
 		if multiout:
 			model = MultiHorizonViT.from_pretrained(
@@ -295,31 +302,32 @@ def load_image_model(
 		if args.ordinal:
 			# - Load ordinal-head model
 			model= load_ordinal_image_model(args, nclasses)
+		
 		else:
-			# - Load standard model
-			model = AutoModelForImageClassification.from_pretrained(
-				args.model, 
-				problem_type="single_label_classification", 
-				id2label=id2label, 
-				label2id=label2id,
-				num_labels=num_labels
-			)
+			if args.binary:
+				# - Load standard tmp model
+				model = AutoModelForImageClassification.from_pretrained(args.model, num_labels=2)  # temp
+				
+				# - Replace the head with 1 logit
+				in_features = model.classifier.in_features
+				model.classifier = torch.nn.Linear(in_features, 1)
+				model.config.num_labels = 1  # avoid confusion; we’ll provide our own loss
+				model.config.problem_type = None  # don't let HF pick MSE; we handle loss in Trainer	
+					
+			else:
+				# - Load standard model
+				model = AutoModelForImageClassification.from_pretrained(
+					args.model, 
+					problem_type="single_label_classification", 
+					id2label=id2label, 
+					label2id=label2id,
+					num_labels=num_labels
+				)
 		
 		# - Load processor	
 		image_processor = AutoImageProcessor.from_pretrained(args.model)
 		
-		
-	#=============================
-	#==  BINARY CLASS
-	#=============================	
-	if args.binary:
-		# Replace the head with 1 logit
-		in_features = model.classifier.in_features
-		model.classifier = torch.nn.Linear(in_features, 1)
-		model.config.num_labels = 1  # avoid confusion; we’ll provide our own loss
-		model.config.problem_type = None  # don't let HF pick MSE; we handle loss in Trainer		
-			
-		
+
 	return model, image_processor	
 	
 						
@@ -359,27 +367,26 @@ def load_video_model(
 	#===================================
 	else:
 		# - Load model
-		model = VideoMAEForVideoClassification.from_pretrained(
-			args.model,
-			problem_type="single_label_classification", 
-			id2label=id2label, 
-			label2id=label2id,
-			num_labels=num_labels
-			#attn_implementation="sdpa", # "flash_attention_2" 
-			#torch_dtype=torch.float16,  # "auto"
-		)
+		if args.binary:
+			model = VideoMAEForVideoClassification.from_pretrained(args.model, num_labels=2) # tmp
+			in_features = model.classifier.in_features
+			model.classifier = torch.nn.Linear(in_features, 1)
+			model.config.num_labels = 1
+			model.config.problem_type = None
+		
+		else:
+			model = VideoMAEForVideoClassification.from_pretrained(
+				args.model,
+				problem_type="single_label_classification", 
+				id2label=id2label, 
+				label2id=label2id,
+				num_labels=num_labels
+				#attn_implementation="sdpa", # "flash_attention_2" 
+				#torch_dtype=torch.float16,  # "auto"
+			)
 	
 	# - Load processor
 	image_processor = VideoMAEImageProcessor.from_pretrained(args.model)
-	
-	#=============================
-	#==  BINARY CLASS
-	#=============================	
-	if args.binary:
-		in_features = model.classifier.in_features
-		model.classifier = torch.nn.Linear(in_features, 1)
-		model.config.num_labels = 1
-		model.config.problem_type = None
 
 	return model, image_processor
 		
@@ -1184,8 +1191,8 @@ def main():
 		summarize_alpha(focal_alpha, counts)
 	
 	# - Debug printout	
-	print("id2label:", model.config.id2label)
-	print("label2id:", model.config.label2id)
+	print("model.config.id2label:", model.config.id2label)
+	print("model.config.label2id:", model.config.label2id)
 		
 	# - Set trainer
 	#if args.use_custom_trainer:
