@@ -163,7 +163,8 @@ def get_args():
 	parser.add_argument("--use_weighted_loss", dest='use_weighted_loss', action="store_true", default=False, help="Use class-weighted loss (CE or focal alpha).")
 	parser.add_argument("--use_weighted_sampler", dest='use_weighted_sampler', action="store_true", default=False, help="Use a WeightedRandomSampler for training.")
 	parser.add_argument("--sample_weight_from_flareid", dest='sample_weight_from_flareid', action="store_true", default=False, help="Compute sample weights from flare id (mostly used for binary class).")
-	parser.add_argument("--weight_compute_mode", dest='weight_compute_mode', type=str, choices=["balanced", "inverse", "inverse_v2"], default="balanced", help="How to compute class/sample weights")
+	parser.add_argument("--weight_compute_mode", dest='weight_compute_mode', type=str, choices=["balanced", "inverse", "inverse_v2"], default="balanced", help="How to compute class weights")
+	parser.add_argument("--sample_weight_compute_mode", dest='sample_weight_compute_mode', type=str, choices=["balanced", "inverse", "inverse_v2"], default="balanced", help="How to compute sample weights")
 	parser.add_argument('--normalize_weights', dest='normalize_weights', action='store_true', help="Enable normalization of class weights.")
 	parser.add_argument('--no_normalize_weights', dest='normalize_weights', action='store_false', help="Disable normalization of class weights.")
 	parser.set_defaults(normalize_weights=True)
@@ -1102,6 +1103,7 @@ def main():
 	# - Compute class weights
 	#num_labels = model.config.num_labels # this is modified in ordinal model
 	class_weights= None
+	class_weights_binary= None
 	if args.use_weighted_loss:
 		logger.info("Computing class weights from dataset ...")
 		class_weights = dataset.compute_class_weights(
@@ -1112,6 +1114,20 @@ def main():
 		)
 		print("--> CLASS WEIGHTS")
 		print(class_weights)
+		
+		# - Compute binary class weights?
+		if args.binary: 
+			logger.info("Computing binary class weights from dataset ...")
+			class_weights_binary= dataset.compute_class_weights(
+				num_classes=num_labels, 
+				id2target=id2target,
+				scheme=args.weight_compute_mode,
+				normalize=args.normalize_weights,
+				positive_label=1, 
+				laplace=1.0
+			)
+			print("--> BINARY CLASS WEIGHTS")
+			print(class_weights_binary)
 		
 	# - Compute ordinal pos weights
 	ordinal_pos_weights= None
@@ -1134,7 +1150,7 @@ def main():
 			logger.info("Computing sample weights from dataset flare_id data ...")
 			sample_weights = dataset.compute_sample_weights_from_flareid(
 				num_classes=4,
-				scheme=args.weight_compute_mode,
+				scheme=args.sample_weight_compute_mode,
 				normalize=args.normalize_weights
 			)
 		else:
@@ -1142,7 +1158,7 @@ def main():
 			sample_weights = dataset.compute_sample_weights(
 				num_classes=num_labels,
 				id2target=id2target,
-				scheme=args.weight_compute_mode,
+				scheme=args.sample_weight_compute_mode,
 				normalize=args.normalize_weights
 			)
 			
@@ -1150,24 +1166,6 @@ def main():
 		print(f"min: {min(sample_weights)}, max: {max(sample_weights)}, mean: {np.mean(sample_weights)}")
 		
 			
-	# - Compute binary weights?
-	class_weights_binary= None
-	sample_weights_binary= None
-	if args.binary:
-		logger.info("Computing binary class/sample weights from dataset ...")
-		stats= dataset.compute_binary_class_weights(id2target, positive_label=1, laplace=1.0)
-		if args.use_weighted_loss: 
-			class_weights_binary= stats["pos_weight_bce"]    # tensor([N_neg/N_pos])
-			
-			print("--> BINARY CLASS WEIGHTS")
-			print(class_weights_binary)
-		
-		if args.use_weighted_sampler:
-			sample_weights_binary = stats["sample_weights"]
-			
-			print("--> BINARY SAMPLE WEIGHTS")
-			print(f"min: {min(sample_weights_binary)}, max: {max(sample_weights_binary)}, mean: {np.mean(sample_weights_binary)}")
-		
 	# Set focal loss pars
 	#   - For focal alpha in multiclass, you can re-use class_weights
 	#   - Often alpha ~ class_weights (normalized); you can also pass a float
@@ -1233,7 +1231,7 @@ def main():
 		ordinal_pos_weights=ordinal_pos_weights,
 		compute_train_metrics=args.compute_train_metrics,
 		binary_pos_weights=class_weights_binary,
-		binary_sample_weights=sample_weights_binary,
+		#binary_sample_weights=sample_weights_binary,
 		verbose=args.verbose
 	)
 		

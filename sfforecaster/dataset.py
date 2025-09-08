@@ -324,7 +324,16 @@ class BaseVisDataset(Dataset):
 		""" Load image metadata """
 		return self.datalist[idx]
 		
-	def compute_class_weights(self, num_classes, id2target, scheme="balanced", normalize=True):
+	def compute_class_weights(
+		self, 
+		num_classes, 
+		id2target, 
+		scheme="balanced", 
+		normalize=True,
+		binary=False,
+    positive_label=1,
+    laplace=1.0
+	):
 		""" Compute class weights from dataset """
     
 		# - Collect labels
@@ -338,70 +347,43 @@ class BaseVisDataset(Dataset):
 		print("counts")
 		print(counts)
 
-		if scheme == "inverse":
-			w = 1.0 / np.maximum(counts, 1.0)
-		elif scheme == "inverse_v2":
-			w = np.max(counts)/counts
+		# --- Binary path: also provide BCE pos_weight + optional per-sample weights
+		if binary and num_classes == 2:
+			pos_idx = int(positive_label)
+			neg_idx = 1 - pos_idx
+
+			# Laplace smoothing to avoid divide-by-zero on rare/empty class
+			pos_s = counts[pos_idx] + laplace
+			neg_s = counts[neg_idx] + laplace
+
+			# BCEWithLogitsLoss: pos_weight multiplies the positive examples in the loss
+			# canonical choice ≈ N_neg / N_pos (do NOT normalize this)
+			class_weights = torch.tensor([neg_s / pos_s], dtype=torch.float32) # length-1 tensor: [N_neg/N_pos]
+       
 		else:
-			# "balanced" like sklearn: n_samples / (n_classes * count_c)
-			n = counts.sum()
-			w = n / (num_classes * np.maximum(counts, 1.0))
+			if scheme == "inverse":
+				w = 1.0 / np.maximum(counts, 1.0)
+			elif scheme == "inverse_v2":
+				w = np.max(counts)/counts
+			else:
+				# "balanced" like sklearn: n_samples / (n_classes * count_c)
+				n = counts.sum()
+				w = n / (num_classes * np.maximum(counts, 1.0))
 
-		# optional normalization (keeps average weight ~1)
-		print("weights")
-		print(w)
-		
-		if normalize:
-			w = w * (num_classes / w.sum())
-			print("weights (after norm)")
+			# optional normalization (keeps average weight ~1)
+			print("weights")
 			print(w)
+			
+			if normalize:
+				w = w * (num_classes / w.sum())
+				print("weights (after norm)")
+				print(w)
 		
-		return torch.tensor(w, dtype=torch.float32)
+			class_weights = torch.tensor(w, dtype=torch.float32)	
 		
-	def compute_binary_class_weights(self, id2target, positive_label=1, laplace=1.0):
-		"""
-			Compute class weights (for CE/sampling) and pos_weight (for BCE) from TRAIN data.
-			- positive_label: which class id is the positive one (usually 1)
-			- laplace: add-1 smoothing to handle zero counts robustly
-			- return_per_example: also return a per-sample weight list (useful for WeightedRandomSampler)
-		"""
-		ys = []
-		for i in range(len(self.datalist)):
-			y = int(self.load_target(i, id2target))
-			ys.append(y)
-		ys = np.asarray(ys)
-
-		# counts
-		n_pos = int((ys == positive_label).sum())
-		n_total = int(ys.size)
-		n_neg = n_total - n_pos
-
-		# smoothed counts (avoid div/zero if a class is rare/absent)
-		pos_s = n_pos + laplace
-		neg_s = n_neg + laplace
-		tot_s = pos_s + neg_s
-
-		# ---- CE-style class weights (balanced like sklearn) ----
-		# w_c = N / (K * count_c), here K=2
-		w_neg = tot_s / (2.0 * neg_s)
-		w_pos = tot_s / (2.0 * pos_s)
-		ce_weights = torch.tensor([w_neg, w_pos], dtype=torch.float32)
-
-		# ---- BCE pos_weight (only for single-logit BCE/BCE-focal) ----
-		# BCEWithLogitsLoss weights positives by 'pos_weight'; typical choice = N_neg / N_pos
-		pos_weight_bce = torch.tensor([neg_s / pos_s], dtype=torch.float32)
-
-		# ---- Sample weights
-		per_ex = np.where(ys == positive_label, float(w_pos), float(w_neg)).astype(np.float32).tolist()
-
-		out = {
-			"counts": {"neg": n_neg, "pos": n_pos, "total": n_total},
-			"ce_weights": ce_weights,
-			"pos_weight_bce": pos_weight_bce,
-			"sample_weights": per_ex
-		}
- 
-		return out	
+		return class_weights
+		
+	
 		
 	def compute_ordinal_pos_weight(self, num_classes, id2target, eps=1e-12, clip_max=None, device=None):
 		"""
@@ -452,7 +434,13 @@ class BaseVisDataset(Dataset):
 		return pw, counts
 		
 		
-	def compute_sample_weights(self, num_classes, id2target, scheme="balanced", normalize=True):
+	def compute_sample_weights(
+		self, 
+		num_classes, 
+		id2target, 
+		scheme="balanced", 
+		normalize=True
+	):
 		"""
 			Returns a list of length len(train_ds) with per-example sampling weights.
 			Typically inverse frequency by class, normalized.
@@ -467,18 +455,23 @@ class BaseVisDataset(Dataset):
 		counts = np.bincount(ys, minlength=num_classes).astype(float)
 		n = counts.sum()
 
+		# - Compute sample weights		
 		if scheme == "inverse":
 			class_w = 1.0 / np.maximum(counts, 1.0)
 		elif scheme == "inverse_v2":
 			class_w = np.max(counts)/counts
 		else:
+			# "balanced": n / (K * count_c)
 			class_w = n / (num_classes * np.maximum(counts, 1.0))
 
-		if normalize:
-			class_w = class_w * (num_classes / class_w.sum())
-			
-		sw = [class_w[y] for y in ys]
-    
+		# ----- normalize class weights to mean ~ 1 across classes (optional) -----
+    if normalize:
+			s = class_w.sum()
+			if s > 0:
+				class_w = class_w * (num_classes / s)
+            
+		sw = [float(class_w[y]) for y in ys]
+		
 		return sw
 		
 	def compute_sample_weights_from_flareid(self, num_classes=4, scheme="balanced", normalize=True):

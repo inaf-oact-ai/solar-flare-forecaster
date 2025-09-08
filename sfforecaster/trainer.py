@@ -540,7 +540,7 @@ class CustomTrainer(Trainer):
 		ordinal_pos_weights=None,
 		compute_train_metrics=False,
 		binary_pos_weights=None, 
-		binary_sample_weights=None,
+		#binary_sample_weights=None,
 		verbose=False,
 		**kwargs
 	):
@@ -560,7 +560,7 @@ class CustomTrainer(Trainer):
 		self.verbose= verbose
 		self.compute_train_metrics = compute_train_metrics
 		self.binary_pos_weights= binary_pos_weights
-		self.binary_sample_weights= binary_sample_weights
+		#self.binary_sample_weights= binary_sample_weights
 		self._reset_train_buffers()
 		
 		self.is_binary_single_logit = (
@@ -725,17 +725,17 @@ class CustomTrainer(Trainer):
 		""" Get train dataloader with resampling """
 		
 		sample_weights= self.sample_weights
-		sample_weights_type= "multiclass"
-		if self.is_binary_single_logit:
-			sample_weights= self.binary_sample_weights
-			sample_weights_type= "binary"
+		#sample_weights_type= "multiclass"
+		#if self.is_binary_single_logit:
+		#	sample_weights= self.binary_sample_weights
+		#	sample_weights_type= "binary"
 		
 		if sample_weights is None:
 			logger.info("No sample weights given, returning standard train dataloader ...")
 			return super().get_train_dataloader()
 
 		# - Weighted sampler (per-example) — replacement=True is standard here
-		logger.info(f"Creating weighted random sampler with {sample_weights_type} sample weights ...")
+		logger.info(f"Creating weighted random sampler ...")
 		sampler = WeightedRandomSampler(
 			weights=sample_weights,
 			num_samples=len(sample_weights),
