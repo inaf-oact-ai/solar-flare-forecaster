@@ -116,6 +116,7 @@ def get_args():
 	parser.add_argument('--binary', dest='binary', action='store_true',help='Choose binary classification label scheme (default=false)')	
 	parser.set_defaults(binary=False)
 	parser.add_argument('-flare_thr', '--flare_thr', dest='flare_thr', required=False, type=str, default='C', action='store',help='Choose flare class label name: {C-->label=C+,M-->label=M+}.')
+	parser.add_argument('-binary_thr', '--binary_thr', dest='binary_thr', required=False, type=float, default=0.5, action='store',help='Binary selection threshold (default=0.5).')
 	
 	parser.add_argument('--multilabel', dest='multilabel', action='store_true',help='Do multilabel classification (default=false)')	
 	parser.set_defaults(multilabel=False)
@@ -307,6 +308,18 @@ def load_image_model(
 		# - Load processor	
 		image_processor = AutoImageProcessor.from_pretrained(args.model)
 		
+		
+	#=============================
+	#==  BINARY CLASS
+	#=============================	
+	if args.binary:
+		# Replace the head with 1 logit
+		in_features = model.classifier.in_features
+		model.classifier = nn.Linear(in_features, 1)
+		model.config.num_labels = 1  # avoid confusion; we’ll provide our own loss
+		model.config.problem_type = None  # don't let HF pick MSE; we handle loss in Trainer		
+			
+		
 	return model, image_processor	
 	
 						
@@ -359,6 +372,15 @@ def load_video_model(
 	# - Load processor
 	image_processor = VideoMAEImageProcessor.from_pretrained(args.model)
 	
+	#=============================
+	#==  BINARY CLASS
+	#=============================	
+	if args.binary:
+		in_features = model.classifier.in_features
+		model.classifier = nn.Linear(in_features, 1)
+		model.config.num_labels = 1
+		model.config.problem_type = None
+
 	return model, image_processor
 		
 			
@@ -820,11 +842,32 @@ def run_predict(
 			image_info["ge_scores"]  = torch.sigmoid(logits.squeeze()).cpu().tolist()  # [>=C, >=M, >=X]
 		
 		else:
-			softmax = torch.nn.Softmax(dim=0)
-			probs = softmax(logits.squeeze().cpu()).numpy()
-			class_id= np.argmax(probs)
+		
+			lt = logits.detach().squeeze().cpu()
+			binary_thr = getattr(args, "binary_thr", 0.5)
+		
+			if lt.ndim == 0 or lt.shape[-1] == 1:
+				# SINGLE-LOGIT BINARY: logits shape (1,) or scalar
+				p_pos = torch.sigmoid(lt).item()
+				p_neg = 1.0 - p_pos
+				# Decision: by threshold when single-logit, not argmax
+				class_id = 1 if p_pos >= binary_thr else 0
+				probs = np.array([p_neg, p_pos], dtype=np.float32)
+				predicted_prob = float(p_pos if class_id == 1 else p_neg)
+			
+			else:
+				# MULTICLASS or 2-LOGIT BINARY HEAD
+				probs = torch.softmax(lt, dim=-1).numpy()
+				class_id = int(np.argmax(probs))
+				predicted_prob = float(probs[class_id])
+
+				#softmax = torch.nn.Softmax(dim=0)
+				#probs = softmax(logits.squeeze().cpu()).numpy()
+				#class_id= np.argmax(probs)
+				#predicted_label = id2label[class_id]
+				#predicted_prob= probs[class_id]
+				
 			predicted_label = id2label[class_id]
-			predicted_prob= probs[class_id]
 				
 			# - Fill prediction results in summary dict
 			image_info["label_pred"]= str(predicted_label)
@@ -1095,6 +1138,15 @@ def main():
 				scheme=args.weight_compute_mode,
 				normalize=args.normalize_weights
 			)
+			
+	# - Compute binary weights?
+	class_weights_binary= None
+	sample_weights_binary= None
+	if args.binary:
+		logger.info("Computing binary class/sample weights from dataset ...")
+		stats= dataset.compute_binary_class_weights(id2target, positive_label=1, laplace=1.0)
+		class_weights_binary= stats["pos_weight_bce"]    # tensor([N_neg/N_pos])
+		sample_weights_binary = stats["sample_weights"] 
 		
 	# Set focal loss pars
 	#   - For focal alpha in multiclass, you can re-use class_weights
@@ -1136,48 +1188,50 @@ def main():
 	print("label2id:", model.config.label2id)
 		
 	# - Set trainer
-	if args.use_custom_trainer:
-		logger.info("Using custom class-weighted loss trainer ...")
-		trainer = CustomTrainer(
-			model=model,
-			args=training_opts,
-			train_dataset=dataset,
-			eval_dataset=dataset_cv,
-			compute_metrics=compute_metrics_custom,
-			processing_class=image_processor,
-			#data_collator=collate_fn,
-			data_collator=data_collator,
-			class_weights=class_weights,
-			multilabel=bool(args.multilabel),
-			loss_type=args.loss_type,                  # "ce" or "focal"
-			focal_gamma=args.focal_gamma,
-			focal_alpha=focal_alpha,              # tensor[C] or float or None
-			sample_weights=sample_weights,        # enables WeightedRandomSampler
-			sol_score=args.sol_score,
-			sol_distribution=args.sol_distribution,
-			sol_mode=args.sol_mode,
-			sol_add_constant=args.sol_add_constant,
-			ordinal=bool(args.ordinal),
-			ordinal_pos_weights=ordinal_pos_weights,
-			compute_train_metrics=args.compute_train_metrics,
-			verbose=args.verbose
-		)
+	#if args.use_custom_trainer:
+	logger.info("Using custom trainer ...")
+	trainer = CustomTrainer(
+		model=model,
+		args=training_opts,
+		train_dataset=dataset,
+		eval_dataset=dataset_cv,
+		compute_metrics=compute_metrics_custom,
+		processing_class=image_processor,
+		#data_collator=collate_fn,
+		data_collator=data_collator,
+		class_weights=class_weights,
+		multilabel=bool(args.multilabel),
+		loss_type=args.loss_type,                  # "ce" or "focal"
+		focal_gamma=args.focal_gamma,
+		focal_alpha=focal_alpha,              # tensor[C] or float or None
+		sample_weights=sample_weights,        # enables WeightedRandomSampler
+		sol_score=args.sol_score,
+		sol_distribution=args.sol_distribution,
+		sol_mode=args.sol_mode,
+		sol_add_constant=args.sol_add_constant,
+		ordinal=bool(args.ordinal),
+		ordinal_pos_weights=ordinal_pos_weights,
+		compute_train_metrics=args.compute_train_metrics,
+		binary_pos_weights=class_weights_binary,
+		binary_sample_weights=sample_weights_binary,
+		verbose=args.verbose
+	)
 		
-		if args.compute_train_metrics:
-			trainer.add_callback(TrainMetricsCallback(trainer))
+	if args.compute_train_metrics:
+		trainer.add_callback(TrainMetricsCallback(trainer))
 		
-	else:
-		logger.info("Using standard trainer ...")
-		trainer = Trainer(
-			model=model,
-			args=training_opts,
-			train_dataset=dataset,
-			eval_dataset=dataset_cv,
-			compute_metrics=compute_metrics_custom,		
-			processing_class=image_processor,
-			#data_collator=collate_fn,
-			data_collator=data_collator,
-		)
+	#else:
+	#	logger.info("Using standard trainer ...")
+	#	trainer = Trainer(
+	#		model=model,
+	#		args=training_opts,
+	#		train_dataset=dataset,
+	#		eval_dataset=dataset_cv,
+	#		compute_metrics=compute_metrics_custom,		
+	#		processing_class=image_processor,
+	#		#data_collator=collate_fn,
+	#		data_collator=data_collator,
+	#	)
 	
 	#######################################
 	##     RUN TEST

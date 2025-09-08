@@ -444,13 +444,25 @@ def single_label_metrics(predictions, labels, target_names=None):
 	""" Helper function to compute single label metrics """
 	
 	# - First, apply sigmoid on predictions which are of shape (batch_size, num_labels)
-	softmax= torch.nn.Softmax(dim=1) # see https://discuss.pytorch.org/t/implicit-dimension-choice-for-softmax-warning/12314/8
-	probs= softmax(torch.Tensor(predictions))
+	#softmax= torch.nn.Softmax(dim=1) # see https://discuss.pytorch.org/t/implicit-dimension-choice-for-softmax-warning/12314/8
+	#probs= softmax(torch.Tensor(predictions))
+	
+	preds_t = torch.as_tensor(predictions)
+	if preds_t.ndim == 1:
+		preds_t = preds_t.view(-1, 1)
+		
+	if preds_t.shape[1] == 1:
+		# single-logit binary: build [P(neg), P(pos)] from sigmoid
+		p_pos = torch.sigmoid(preds_t)             # (B,1)
+		probs = torch.cat([1.0 - p_pos, p_pos], 1) # (B,2)
+	else:
+		probs = torch.softmax(preds_t, dim=1)	
 	
 	# - Next, use threshold to turn them into integer predictions
 	#y_pred= np.argmax(probs, axis=1)
 	y_pred = torch.argmax(probs, dim=1).numpy()
-	  
+	
+	
 	# - Finally, compute metrics
 	#   Ensure labels are NumPy array
 	#y_true = np.where(labels==1)[1]
@@ -582,8 +594,7 @@ def single_label_metrics(predictions, labels, target_names=None):
 	tss_expected_avg = tss_expected_from_probs(probs_t, y_idx_t, mode="average")
 	tss_expected_w   = tss_expected_from_probs(probs_t, y_idx_t, mode="weighted")
 	
-		
-	
+
 	# - Return as dictionary
 	metrics = {
 		'class_names': class_names,

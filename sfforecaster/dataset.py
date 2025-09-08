@@ -358,6 +358,51 @@ class BaseVisDataset(Dataset):
 		
 		return torch.tensor(w, dtype=torch.float32)
 		
+	def compute_binary_class_weights(self, id2target, positive_label=1, laplace=1.0):
+		"""
+			Compute class weights (for CE/sampling) and pos_weight (for BCE) from TRAIN data.
+			- positive_label: which class id is the positive one (usually 1)
+			- laplace: add-1 smoothing to handle zero counts robustly
+			- return_per_example: also return a per-sample weight list (useful for WeightedRandomSampler)
+		"""
+		ys = []
+		for i in range(len(self.datalist)):
+			y = int(self.load_target(i, id2target))
+			ys.append(y)
+		ys = np.asarray(ys)
+
+		# counts
+		n_pos = int((ys == positive_label).sum())
+		n_total = int(ys.size)
+		n_neg = n_total - n_pos
+
+		# smoothed counts (avoid div/zero if a class is rare/absent)
+		pos_s = n_pos + laplace
+		neg_s = n_neg + laplace
+		tot_s = pos_s + neg_s
+
+		# ---- CE-style class weights (balanced like sklearn) ----
+		# w_c = N / (K * count_c), here K=2
+		w_neg = tot_s / (2.0 * neg_s)
+		w_pos = tot_s / (2.0 * pos_s)
+		ce_weights = torch.tensor([w_neg, w_pos], dtype=torch.float32)
+
+		# ---- BCE pos_weight (only for single-logit BCE/BCE-focal) ----
+		# BCEWithLogitsLoss weights positives by 'pos_weight'; typical choice = N_neg / N_pos
+		pos_weight_bce = torch.tensor([neg_s / pos_s], dtype=torch.float32)
+
+		# ---- Sample weights
+		per_ex = np.where(ys == positive_label, float(w_pos), float(w_neg)).astype(np.float32).tolist()
+
+		out = {
+			"counts": {"neg": n_neg, "pos": n_pos, "total": n_total},
+			"ce_weights": ce_weights,
+			"pos_weight_bce": pos_weight_bce,
+			"sample_weights": per_ex
+		}
+ 
+		return out	
+		
 	def compute_ordinal_pos_weight(self, num_classes, id2target, eps=1e-12, clip_max=None, device=None):
 		"""
 			Build per-threshold pos_weight for ordinal/cumulative tasks directly from dataset counts.

@@ -539,6 +539,8 @@ class CustomTrainer(Trainer):
 		ordinal=False,
 		ordinal_pos_weights=None,
 		compute_train_metrics=False,
+		binary_pos_weights=None, 
+		binary_sample_weights=None,
 		verbose=False,
 		**kwargs
 	):
@@ -557,7 +559,15 @@ class CustomTrainer(Trainer):
 		self.ordinal_pos_weights= ordinal_pos_weights
 		self.verbose= verbose
 		self.compute_train_metrics = compute_train_metrics
+		self.binary_pos_weights= binary_pos_weights, 
+		self.binary_sample_weights= binary_sample_weights,
 		self._reset_train_buffers()
+		
+		self.is_binary_single_logit = (
+			not self.multilabel and
+			not self.ordinal and
+			getattr(self.model.config, "num_labels", None) == 1
+		)
 
 		# - Build the loss criterion
 		if self.multilabel:
@@ -606,14 +616,37 @@ class CustomTrainer(Trainer):
 			##  SINGLE-LABEL
 			#########################
 			if self.loss_type == "ce":
-				w = self.class_weights.to(self.model.device) if self.class_weights is not None else None
-				self.loss_fct = torch.nn.CrossEntropyLoss(weight=w)
+				#w = self.class_weights.to(self.model.device) if self.class_weights is not None else None
+				#self.loss_fct = torch.nn.CrossEntropyLoss(weight=w)
+		
+				if self.is_binary_single_logit:
+					# BCE for single-logit binary
+					pos_w = (self.binary_pos_weights.to(self.model.device) if self.binary_pos_weights is not None else None)
+					self.loss_fct = torch.nn.BCEWithLogitsLoss(pos_weight=pos_w)
+				else:
+					w = self.class_weights.to(self.model.device) if self.class_weights is not None else None
+					self.loss_fct = torch.nn.CrossEntropyLoss(weight=w)	
+				
 		
 			elif self.loss_type == "focal":
-				alpha = self.focal_alpha
-				if isinstance(alpha, torch.Tensor):
-					alpha = alpha.to(self.model.device)
-				self.loss_fct = FocalLossMultiClass(alpha=alpha, gamma=self.focal_gamma, reduction="mean")
+				#alpha = self.focal_alpha
+				#if isinstance(alpha, torch.Tensor):
+				#	alpha = alpha.to(self.model.device)
+				#self.loss_fct = FocalLossMultiClass(alpha=alpha, gamma=self.focal_gamma, reduction="mean")
+				
+				if self.is_binary_single_logit:
+					# Use BCE-style focal via multilabel focal (C=1)
+					pos_w = (self.binary_pos_weights.to(self.model.device) if self.binary_pos_weights is not None else None)
+					self.loss_fct = FocalLossMultiLabel(
+						gamma=self.focal_gamma,
+						pos_weight=pos_w,      # class tilt for positives
+						reduction="mean",
+					)
+				else:
+					alpha = self.focal_alpha
+					if isinstance(alpha, torch.Tensor):
+						alpha = alpha.to(self.model.device)
+					self.loss_fct = FocalLossMultiClass(alpha=alpha, gamma=self.focal_gamma, reduction="mean")
 				
 			elif self.loss_type == "sol":
 				# Note: from_logits=True; multiclass handled automatically
@@ -649,14 +682,25 @@ class CustomTrainer(Trainer):
 			print("⚠️ NaN values detected in logits tensor!")
 			
 		
-		if self.multilabel:
+		# ---- shape fix for single-logit binary + BCE/focal ----
+		if self.is_binary_single_logit and self.loss_type in ("ce", "focal"):
+			# logits: (B,1), labels: (B,) -> (B,1)
+			labels = labels.float().view(-1, 1)
+
+		if self.multilabel or (self.is_binary_single_logit and self.loss_type in ("ce","focal")):
+			# BCE-style losses expect float targets
 			labels = labels.float()
-			loss = self.loss_fct(logits, labels)
-		else:
-			## SOL expects:
-			#  - binary: logits shape (B,) or (B,1), labels (B,)
-			#  - multiclass: logits (B,K), labels (B,)
-			loss = self.loss_fct(logits, labels)
+		
+		loss = self.loss_fct(logits, labels)
+		
+		#if self.multilabel:
+		#	labels = labels.float()
+		#	loss = self.loss_fct(logits, labels)
+		#else:
+		#	## SOL expects:
+		#	#  - binary: logits shape (B,) or (B,1), labels (B,)
+		#	#  - multiclass: logits (B,K), labels (B,)
+		#	loss = self.loss_fct(logits, labels)
 			
 		if self.verbose:
 			print("logits")
@@ -680,15 +724,19 @@ class CustomTrainer(Trainer):
 	def get_train_dataloader(self):
 		""" Get train dataloader with resampling """
 		
-		if self.sample_weights is None:
+		sample_weights= self.sample_weights
+		if self.is_binary_single_logit:
+			sample_weights= self.binary_sample_weights
+		
+		if sample_weights is None:
 			logger.info("No sample weights given, returning standard train dataloader ...")
 			return super().get_train_dataloader()
 
 		# - Weighted sampler (per-example) — replacement=True is standard here
 		logger.info("Creating weighted random sampler ...")
 		sampler = WeightedRandomSampler(
-			weights=self.sample_weights,
-			num_samples=len(self.sample_weights),
+			weights=sample_weights,
+			num_samples=len(sample_weights),
 			replacement=True,
 			generator=torch.Generator().manual_seed(self.args.seed)
 		)
@@ -763,6 +811,12 @@ class CustomTrainer(Trainer):
 
 		# Log via Trainer's logger (goes to W&B if report_to includes "wandb")
 		self.log(metrics)
+		
+	def _compute_pos_weight_from_ce_weights(self):
+		if self.class_weights is None or self.class_weights.numel() < 2:
+			return None
+		w_neg, w_pos = self.class_weights[0].to(self.model.device), self.class_weights[1].to(self.model.device)
+		return (w_pos / (w_neg + 1e-12))	
 		
 		
 class TrainMetricsCallback(TrainerCallback):
