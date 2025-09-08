@@ -465,7 +465,7 @@ class BaseVisDataset(Dataset):
 			class_w = n / (num_classes * np.maximum(counts, 1.0))
 
 		# ----- normalize class weights to mean ~ 1 across classes (optional) -----
-    if normalize:
+		if normalize:
 			s = class_w.sum()
 			if s > 0:
 				class_w = class_w * (num_classes / s)
