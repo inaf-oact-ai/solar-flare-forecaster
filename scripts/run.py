@@ -1147,7 +1147,7 @@ def main():
 			)
 			
 		print("--> SAMPLE WEIGHTS")
-		print(f"min: {min(sample_weights), max: {max(sample_weights)}, mean: {mean(sample_weights)}")
+		print(f"min: {min(sample_weights)}, max: {max(sample_weights)}, mean: {mean(sample_weights)}")
 		
 			
 	# - Compute binary weights?
@@ -1166,7 +1166,7 @@ def main():
 			sample_weights_binary = stats["sample_weights"]
 			
 			print("--> BINARY SAMPLE WEIGHTS")
-			print(f"min: {min(sample_weights_binary), max: {max(sample_weights_binary)}, mean: {mean(sample_weights_binary)}")
+			print(f"min: {min(sample_weights_binary)}, max: {max(sample_weights_binary)}, mean: {mean(sample_weights_binary)}")
 		
 	# Set focal loss pars
 	#   - For focal alpha in multiclass, you can re-use class_weights
