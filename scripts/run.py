@@ -1092,13 +1092,16 @@ def main():
 	logger.info("Creating training options ...")
 	training_opts= load_training_opts(args)
 	
+	# - Set metrics options
+	chunk_size= training_opts.per_device_train_batch_size if dataset_cv is None else training_opts.per_device_eval_batch_size
+	
 	# - Set metrics
 	if args.multilabel:
 		compute_metrics_custom= build_multi_label_metrics(label_names)
 	elif args.ordinal:
 		compute_metrics_custom= build_ordinal_metrics(label_names, thresholds=args.ordinal_thresholds)
 	else:
-		compute_metrics_custom= build_single_label_metrics(label_names)
+		compute_metrics_custom= build_single_label_metrics(label_names, chunk_size=chunk_size)
 		
 	# - Compute class weights
 	#num_labels = model.config.num_labels # this is modified in ordinal model

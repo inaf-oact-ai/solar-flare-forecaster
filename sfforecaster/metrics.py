@@ -11,6 +11,8 @@ import os
 import random
 import numpy as np
 import re
+from copy import deepcopy
+
 
 # - SKLEARN
 from sklearn import metrics
@@ -33,6 +35,7 @@ from transformers import EvalPrediction
 
 # - SCLASSIFIER-VIT
 from sfforecaster.utils import *
+from sfforecaster.trainer import ScoreOrientedLoss
 from sfforecaster import logger
 
 ##########################################
@@ -333,6 +336,27 @@ def tss_expected_from_probs(probs: torch.Tensor, y_idx: torch.Tensor, mode: str 
 
 	return float(scores.mean())
 
+
+# --- MEAN-OF-BATCHES SOL LOSS (should track eval/loss) ---
+def chunked_mean_sol_loss(logits_np, labels_np, chunk=64, add_constant=False):
+	# same settings as training
+	sol = ScoreOrientedLoss(
+		score_fn="tss",
+		distribution="uniform",
+		mu=0.5, delta=0.1,
+		mode="average",
+		add_constant=add_constant,
+	)
+	logits_t = torch.as_tensor(logits_np)
+	labels_t = torch.as_tensor(labels_np)
+
+	losses = []
+	for i in range(0, logits_t.size(0), chunk):
+		lo, hi = i, min(i+chunk, logits_t.size(0))
+		l = sol(logits_t[lo:hi], labels_t[lo:hi])
+		losses.append(float(l.detach().cpu().item()))
+	return float(np.mean(losses)) if len(losses) else float("nan")
+
 def safe_key(name):
 	# turn labels like "C+" / "M+" into log-safe keys: "C_" / "M_"
 	return re.sub(r"[^A-Za-z0-9_]+", "_", str(name))
@@ -440,7 +464,7 @@ def build_multi_label_metrics(target_names):
 ###########################################
 ##   SINGLE-LABEL CLASS METRICS
 ###########################################
-def single_label_metrics(predictions, labels, target_names=None):
+def single_label_metrics(predictions, labels, target_names=None, chunk_size=64):
 	""" Helper function to compute single label metrics """
 	
 	# - First, apply sigmoid on predictions which are of shape (batch_size, num_labels)
@@ -461,7 +485,6 @@ def single_label_metrics(predictions, labels, target_names=None):
 	# - Next, use threshold to turn them into integer predictions
 	#y_pred= np.argmax(probs, axis=1)
 	y_pred = torch.argmax(probs, dim=1).numpy()
-	
 	
 	# - Finally, compute metrics
 	#   Ensure labels are NumPy array
@@ -594,7 +617,10 @@ def single_label_metrics(predictions, labels, target_names=None):
 	tss_expected_avg = tss_expected_from_probs(probs_t, y_idx_t, mode="average")
 	tss_expected_w   = tss_expected_from_probs(probs_t, y_idx_t, mode="weighted")
 	
-
+	logits_np = predictions 
+	labels_np = y_true
+	sol_loss_mean_of_batches= chunked_mean_sol_loss(logits_np, labels_np, chunk=chunk_size)
+	
 	# - Return as dictionary
 	metrics = {
 		'class_names': class_names,
@@ -624,7 +650,8 @@ def single_label_metrics(predictions, labels, target_names=None):
 		'gss': GSS,
 		'mcc': MCC_coeff,
 		'tss_exp_avg': tss_expected_avg,
-		'tss_exp_weighted': tss_expected_w
+		'tss_exp_weighted': tss_expected_w,
+		'sol_loss_mean_of_batches': sol_loss_mean_of_batches,
 	}
 	
 	if not binary_class:
@@ -701,18 +728,20 @@ def single_label_metrics(predictions, labels, target_names=None):
 	  
 	return metrics
 
-def build_single_label_metrics(target_names):
+def build_single_label_metrics(target_names, chunk_size):
 
 	def compute_single_label_metrics(p: EvalPrediction):
 		""" Compute metrics """
 		preds = p.predictions[0] if isinstance(p.predictions, tuple) else p.predictions
 		nonlocal target_names
+		nonlocal chunk_size
 		
 		# - Compute all metrics
 		metrics = single_label_metrics(
 			predictions=preds, 
 			labels=p.label_ids,
-			target_names=target_names
+			target_names=target_names,
+			chunk_size=chunk_size
 		)
 		
 		# - Trainer wants only the scalar metrics
@@ -775,7 +804,8 @@ def build_single_label_metrics(target_names):
 				{
 					"tss_exp_avg": float(metrics["tss_exp_avg"]),
 					"tss_exp_weighted": float(metrics["tss_exp_weighted"]),
-					"sol_loss_global": float(-metrics["tss_exp_avg"])
+					"sol_loss_global": float(-metrics["tss_exp_avg"]),
+					"sol_loss_mean_of_batches": float(metrics["sol_loss_mean_of_batches"]),
 				}
 			)
 		
