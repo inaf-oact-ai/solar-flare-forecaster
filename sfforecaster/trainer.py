@@ -488,8 +488,8 @@ class ScoreOrientedLoss(nn.Module):
 		else:
 			score = scores.mean()
 			
-		print("score")
-		print(score)
+		#print("score")
+		#print(score)
 			
 		return score
 
@@ -511,8 +511,8 @@ class ScoreOrientedLoss(nn.Module):
 		else:
 			loss_sol= -score
 			
-		print("loss_sol")
-		print(loss_sol)
+		#print("loss_sol")
+		#print(loss_sol)
 
 		return loss_sol
 		
@@ -559,8 +559,8 @@ class CustomTrainer(Trainer):
 		self.ordinal_pos_weights= ordinal_pos_weights
 		self.verbose= verbose
 		self.compute_train_metrics = compute_train_metrics
-		self.binary_pos_weights= binary_pos_weights, 
-		self.binary_sample_weights= binary_sample_weights,
+		self.binary_pos_weights= binary_pos_weights
+		self.binary_sample_weights= binary_sample_weights
 		self._reset_train_buffers()
 		
 		self.is_binary_single_logit = (
