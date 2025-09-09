@@ -249,26 +249,28 @@ def load_ordinal_image_model(
 	return model
 	
 
-def load_image_model(
+def load_image_model_vit(
 	args,
 	id2label,
 	label2id,
 	num_labels,
-	nclasses
+	nclasses,
+	inference_mode=False
 ):
-	""" Load image model & processor """
+	""" Load image model & processor (ViT loader version) """
 
-	#===================================
-	#==     MULTI-OUT MODEL
-	#===================================
 	# - Load model
-	if args.vitloader:
+	if inference_mode:
+		model= ViTForImageClassification.from_pretrained(args.model)
+		model.eval()
+		
+	else:
 		if args.binary:
 			config= ViTConfig.from_pretrained(
 				args.model,
 				problem_type=None, 
 				num_labels=1
-			)
+			)	
 		else:
 			config= ViTConfig.from_pretrained(
 				args.model,
@@ -278,36 +280,48 @@ def load_image_model(
 				num_labels=num_labels
 			)
 		
-		if multiout:
-			model = MultiHorizonViT.from_pretrained(
-				args.model,
-				config=config,
-				num_horizons=args.num_horizons,
-				num_classes=nclasses
-			)
-
-		else:
-			model= ViTForImageClassification.from_pretrained(
-				args.model,
-				config=config
-			)
+		model= ViTForImageClassification.from_pretrained(
+			args.model,
+			config=config
+		)
+		
+		if args.binary:
+			# - Replace the head with 1 logit
+			in_features = model.classifier.in_features
+			model.classifier = torch.nn.Linear(in_features, 1)
+			model.config.num_labels = 1  # avoid confusion; we’ll provide our own loss
+			model.config.problem_type = None  # don't let HF pick MSE; we handle loss in Trainer	
 				
-		# - Load processor	
-		image_processor = ViTImageProcessor.from_pretrained(args.model)
+				
+	# - Load processor	
+	image_processor = ViTImageProcessor.from_pretrained(args.model)
 	
-	#===================================
-	#==     SINGLE-OUT MODEL
-	#===================================
+	return model, image_processor
+		
+
+def load_image_model_auto(
+	args,
+	id2label,
+	label2id,
+	num_labels,
+	nclasses,
+	inference_mode=False
+):
+	""" Load image model & processor (AutoModelForImageClassification loader version) """
+
+	if inference_mode:
+		model = AutoModelForImageClassification.from_pretrained(args.model)
+		model.eval()
 	else:
-	
+		# - Load ordinal-head model
 		if args.ordinal:
-			# - Load ordinal-head model
 			model= load_ordinal_image_model(args, nclasses)
 		
+		# - Load standard-head model
 		else:
-			if args.binary:
+			if args.binary:		
 				# - Load standard tmp model
-				model = AutoModelForImageClassification.from_pretrained(args.model, num_labels=1)  # temp
+				model = AutoModelForImageClassification.from_pretrained(args.model, num_labels=2)  # temp
 				
 				# - Replace the head with 1 logit
 				in_features = model.classifier.in_features
@@ -325,49 +339,70 @@ def load_image_model(
 					num_labels=num_labels
 				)
 		
-		# - Load processor	
-		image_processor = AutoImageProcessor.from_pretrained(args.model)
+	# - Load processor	
+	image_processor = AutoImageProcessor.from_pretrained(args.model)
 		
+	return model, image_processor	
 
+
+def load_image_model(
+	args,
+	id2label,
+	label2id,
+	num_labels,
+	nclasses,
+	inference_mode=False
+):
+	""" Load image model & processor """
+
+	#===================================
+	#==     VIT-LOADER
+	#===================================
+	# - Load model
+	if args.vitloader:
+		model, image_processor= load_image_model_vit(
+			args,	
+			id2label,
+			label2id,
+			num_labels,
+			nclasses,
+			inference_mode
+		)
+	
+	#===================================
+	#==     AUTOMODEL
+	#===================================
+	else:
+		model, image_processor= load_image_model_auto(
+			args,	
+			id2label,
+			label2id,
+			num_labels,
+			nclasses,
+			inference_mode
+		)
+		
 	return model, image_processor	
 	
-						
+		
+
 			
 def load_video_model(
 	args,
 	id2label,
 	label2id,
 	num_labels,
-	nclasses
+	nclasses,
+	inference_mode=False
 ):
 	""" Load video model & processor """
 	
-	#===================================
-	#==     MULTI-OUT MODEL
-	#===================================
-	if args.multiout:
-		# - Load config
-		config = VideoMAEConfig.from_pretrained(
-			args.model,
-			problem_type="single_label_classification", 
-			id2label=id2label, 
-			label2id=label2id,
-			num_labels=num_labels
-		)
+	# - Load model
+	if inference_mode:
+		model = VideoMAEForVideoClassification.from_pretrained(args.model)
+		model.eval()
 		
-		# - Load model
-		model = MultiHorizonVideoMAE.from_pretrained(
-			args.model,
-			config=config,
-			num_horizons=args.num_horizons,
-			num_classes=nclasses
-		)
-
-	#===================================
-	#==     SINGLE-OUT MODEL
-	#===================================
 	else:
-		# - Load model
 		if args.binary:
 			model = VideoMAEForVideoClassification.from_pretrained(args.model, num_labels=1) # tmp
 			in_features = model.classifier.in_features
@@ -397,14 +432,15 @@ def load_model(
 	id2label,
 	label2id,
 	num_labels,
-	nclasses
+	nclasses,
+	inference_mode=False
 ):
 	""" Load model & processor """
 	
 	if args.videoloader:
-		return load_video_model(args, id2label, label2id, num_labels, nclasses)
+		return load_video_model(args, id2label, label2id, num_labels, nclasses, inference_mode)
 	else:
-		return load_image_model(args, id2label, label2id, num_labels, nclasses)
+		return load_image_model(args, id2label, label2id, num_labels, nclasses, inference_mode)
 
 
 def freeze_model(model, args):
@@ -1020,7 +1056,10 @@ def main():
 	#===========================
 	# - Load model & processor
 	logger.info("Loading model & processor (name=%s) ..." % (modelname))
-	model, image_processor= load_model(args, id2label, label2id, num_labels, nclasses)
+	inference_mode= False
+	if args.test or args.predict:
+		inference_mode= True
+	model, image_processor= load_model(args, id2label, label2id, num_labels, nclasses, inference_mode)
 	
 	# - Move model to device
 	model= model.to(device)
