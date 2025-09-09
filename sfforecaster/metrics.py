@@ -343,7 +343,8 @@ def chunked_mean_sol_loss(logits_np, labels_np, chunk=64, add_constant=False):
 	sol = ScoreOrientedLoss(
 		score_fn="tss",
 		distribution="uniform",
-		mu=0.5, delta=0.1,
+		mu=0.5, 
+		delta=0.1,
 		mode="average",
 		add_constant=add_constant,
 	)

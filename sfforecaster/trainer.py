@@ -653,7 +653,8 @@ class CustomTrainer(Trainer):
 				self.loss_fct = ScoreOrientedLoss(
 					score_fn=self.sol_score,
 					distribution=self.sol_distribution,
-					mu=0.5, delta=0.1,       # ignored for uniform
+					mu=0.5, 
+					delta=0.1,       # ignored for uniform
 					mode=self.sol_mode,
 					#from_logits=True,
 					add_constant=self.sol_add_constant,  # usually False (pure -TSS)

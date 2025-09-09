@@ -307,7 +307,7 @@ def load_image_model(
 		else:
 			if args.binary:
 				# - Load standard tmp model
-				model = AutoModelForImageClassification.from_pretrained(args.model, num_labels=2)  # temp
+				model = AutoModelForImageClassification.from_pretrained(args.model, num_labels=1)  # temp
 				
 				# - Replace the head with 1 logit
 				in_features = model.classifier.in_features
@@ -369,7 +369,7 @@ def load_video_model(
 	else:
 		# - Load model
 		if args.binary:
-			model = VideoMAEForVideoClassification.from_pretrained(args.model, num_labels=2) # tmp
+			model = VideoMAEForVideoClassification.from_pretrained(args.model, num_labels=1) # tmp
 			in_features = model.classifier.in_features
 			model.classifier = torch.nn.Linear(in_features, 1)
 			model.config.num_labels = 1
