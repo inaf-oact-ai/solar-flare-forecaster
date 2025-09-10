@@ -21,6 +21,8 @@ import torchvision.transforms.functional as TF
 import torchvision.transforms as T
 import torch.nn as nn
 import torch.nn.functional as F
+import torch.distributed as dist
+from torch.utils.data import Sampler
 
 # - TRANSFORMERS
 import transformers
@@ -567,7 +569,79 @@ class ScoreOrientedLoss(nn.Module):
 
 		return loss_sol
 		
-		
+
+##########################################
+##    DATA SAMPLERS
+##########################################
+class DistributedWeightedRandomSampler(Sampler):
+	def __init__(
+		self, 
+		weights, 
+		num_samples=None,
+		replacement=True,
+		num_replicas=None, 
+		rank=None, 
+		seed=0
+	):
+		self.weights = torch.as_tensor(weights, dtype=torch.float)
+		self.N = len(self.weights)
+		if num_replicas is None:
+			if dist.is_available() and dist.is_initialized():
+				num_replicas = dist.get_world_size()
+			else:
+				num_replicas = 1
+		if rank is None:
+			if dist.is_available() and dist.is_initialized():
+				rank = dist.get_rank()
+			else:
+				rank = 0
+		self.num_replicas = num_replicas
+		self.rank = rank
+		self.replacement = replacement
+		self.seed = seed
+		self.epoch = 0
+
+		# build initial shard mapping like DistributedSampler
+		self.num_samples_per_replica = int(math.ceil(self.N / self.num_replicas))
+		self.total_size = self.num_samples_per_replica * self.num_replicas
+		self.num_samples = num_samples or self.num_samples_per_replica
+		self._build_local_indices()
+
+	def _build_local_indices(self):
+		# deterministic shuffle per epoch like DistributedSampler
+		g = torch.Generator()
+		g.manual_seed(self.seed + self.epoch)
+		perm = torch.randperm(self.N, generator=g)
+
+		# pad then shard
+		if self.total_size > self.N:
+			padding = perm[: self.total_size - self.N]
+			perm = torch.cat([perm, padding], dim=0)
+        
+		# contiguous chunk for this rank
+		start = self.rank * self.num_samples_per_replica
+		end = start + self.num_samples_per_replica
+		self.local_indices = perm[start:end]
+		self.local_weights = self.weights[self.local_indices]
+
+	def __iter__(self):
+		# independent draw on local shard
+		g = torch.Generator()
+		g.manual_seed(self.seed + self.epoch + 12345 + self.rank)
+		if self.replacement:
+			picks = torch.multinomial(self.local_weights, self.num_samples, replacement=True, generator=g)
+		else:
+			k = min(self.num_samples, self.local_indices.numel())
+			picks = torch.multinomial(self.local_weights, k, replacement=False, generator=g)
+		yield from self.local_indices[picks].tolist()
+
+	def __len__(self):
+		return self.num_samples
+
+	def set_epoch(self, epoch: int):
+		self.epoch = epoch
+		self._build_local_indices()
+
 ##########################################
 ##    CUSTOM TRAINER
 ##########################################
@@ -779,26 +853,72 @@ class CustomTrainer(Trainer):
 
 		return (loss, outputs) if return_outputs else loss
 
+	
+	def _get_train_sampler(self):
+		# When we build our own weighted sampler, do not let HF create another one.
+		if self.sample_weights is not None:
+			return None
+		return super()._get_train_sampler()
+		
+
 	def get_train_dataloader(self):
 		""" Get train dataloader with resampling """
 		
-		sample_weights= self.sample_weights
-		#sample_weights_type= "multiclass"
-		#if self.is_binary_single_logit:
-		#	sample_weights= self.binary_sample_weights
-		#	sample_weights_type= "binary"
-		
-		if sample_weights is None:
-			logger.info("No sample weights given, returning standard train dataloader ...")
-			return super().get_train_dataloader()
+		sw = self.sample_weights
 
-		# - Weighted sampler (per-example) — replacement=True is standard here
-		logger.info(f"Creating weighted random sampler ...")
+		# --- No weights: delegate to base Trainer (this is already distributed) ---
+		if sw is None:
+			logger.info("No sample weights given, using standard train dataloader ...")
+			dl = super().get_train_dataloader()
+			if self.args.local_rank in (-1, 0):
+				print("Sampler:", type(dl.sampler).__name__)
+				try:
+					print("Replicas/rank:", dl.sampler.num_replicas, dl.sampler.rank)
+				except AttributeError:
+					pass
+			return dl
+		
+		# --- Defensive checks on weights ---
+		if len(sw) != len(self.train_dataset):
+			raise ValueError(f"sample_weights length ({len(sw)}) != train_dataset length ({len(self.train_dataset)}). Make sure weights are computed AFTER any filtering/subsetting.")
+    
+		import torch as _torch
+		sw = _torch.as_tensor(sw, dtype=_torch.float)
+				
+		# --- DDP path: use your shard-aware sampler ---
+		if (getattr(self.args, "world_size", 1) or 1) > 1:
+			logger.info("DDP detected, using shard-aware sampler ...")
+			# IMPORTANT: class should implement set_epoch(epoch)
+			logger.info()
+			sampler = DistributedWeightedRandomSampler(
+				weights=sw,
+				# Let the sampler compute per-replica length internally or pass explicitly:
+				# num_samples=None,
+				replacement=True,
+				num_replicas=self.args.world_size,
+				rank=self.args.process_index,
+				seed=self.args.seed,
+			)
+			dl = DataLoader(
+				self.train_dataset,
+				batch_size=self.args.train_batch_size,
+				sampler=sampler,
+				collate_fn=self.data_collator,
+				num_workers=self.args.dataloader_num_workers,
+				pin_memory=self.args.dataloader_pin_memory,
+				drop_last=self.args.dataloader_drop_last,
+				persistent_workers=getattr(self.args, "dataloader_persistent_workers", False) and self.args.dataloader_num_workers > 0,
+			)
+			return dl
+        
+		
+		# --- Single-process path: standard weighted sampler ---
+		logger.info("Using weighted random sampler ...")
 		sampler = WeightedRandomSampler(
-			weights=sample_weights,
-			num_samples=len(sample_weights),
+			weights=sw,
+			num_samples=len(sw),
 			replacement=True,
-			generator=torch.Generator().manual_seed(self.args.seed)
+			generator=torch.Generator().manual_seed(self.args.seed),
 		)
 		return DataLoader(
 			self.train_dataset,
@@ -808,7 +928,9 @@ class CustomTrainer(Trainer):
 			num_workers=self.args.dataloader_num_workers,
 			pin_memory=self.args.dataloader_pin_memory,
 			drop_last=self.args.dataloader_drop_last,
+			persistent_workers=getattr(self.args, "dataloader_persistent_workers", False) and self.args.dataloader_num_workers > 0,
 		)
+		
 	
 	def _reset_train_buffers(self):
 		self._train_logits = []

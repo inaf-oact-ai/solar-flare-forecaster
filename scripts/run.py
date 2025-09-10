@@ -201,6 +201,10 @@ def get_args():
 	parser.add_argument("--rank", type=int, default=int(os.environ.get("RANK", -1)))
 	parser.add_argument("--world_size", type=int, default=int(os.environ.get("WORLD_SIZE", -1)))
 
+	parser.add_argument("--num_workers", type=int, default=0)
+	parser.add_argument("--pin_memory", type=str, choices=["true","false"], default="false")
+	parser.add_argument("--persistent_workers", type=str, choices=["true","false"], default="false")
+
 	# - Output options
 	parser.add_argument('-outdir','--outdir', dest='outdir', required=False, default="", type=str, help='Output data dir') 
 	#parser.add_argument('--save_model_every_epoch', dest='save_model_every_epoch', action='store_true', help='Save model every epoch (default=false)')	
@@ -792,9 +796,9 @@ def load_training_opts(args):
     #report_to="wandb",  # enable logging to W&B
     report_to=args.report_to,
     seed=args.seed,
-		#dataloader_num_workers=0,
-		#dataloader_pin_memory=False,
-		#dataloader_persistent_workers=False
+		dataloader_num_workers=args.num_workers,
+		dataloader_pin_memory=(args.pin_memory=="true"),
+		dataloader_persistent_workers=(args.persistent_workers=="true" and args.num_workers>0),
 	)
 	
 	print("--> training options")
