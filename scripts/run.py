@@ -10,6 +10,8 @@ import sys
 import os
 import random
 import numpy as np
+import argparse
+from pathlib import Path
 
 # - SKLEARN
 from sklearn import metrics
@@ -31,7 +33,7 @@ from transformers import Trainer
 from transformers import pipeline
 from transformers import AutoProcessor, AutoModel
 from transformers import AutoImageProcessor, AutoModelForImageClassification
-from transformers import ViTForImageClassification, ViTConfig
+from transformers import ViTImageProcessor, ViTForImageClassification, ViTConfig
 from transformers import VideoMAEImageProcessor, VideoMAEForPreTraining
 from transformers import VideoMAEForVideoClassification
 from transformers.configuration_utils import PretrainedConfig
@@ -48,15 +50,15 @@ from transformers import EvalPrediction
 from sfforecaster.model import MultiHorizonVideoMAE
 from sfforecaster.utils import *
 from sfforecaster.dataset import get_target_maps
-from sfforecaster.dataset import VideoDataset, ImgDataset, ImgStackDataset
+from sfforecaster.dataset import VideoDataset, ImgDataset, ImgStackDataset, TSDataset
 from sfforecaster.custom_transforms import FlippingTransform, Rotate90Transform
 from sfforecaster.custom_transforms import VideoFlipping, VideoResize, VideoNormalize, VideoRotate90 
 from sfforecaster.metrics import build_multi_label_metrics, build_single_label_metrics, build_ordinal_metrics
 from sfforecaster.trainer import CustomTrainer, TrainMetricsCallback
-from sfforecaster.trainer import VideoDataCollator, ImgDataCollator
+from sfforecaster.trainer import VideoDataCollator, ImgDataCollator, TSDataCollator
 from sfforecaster.model import CoralOrdinalHead
 from sfforecaster.inference import coral_logits_to_class_probs, coral_decode_with_thresholds
-from sfforecaster.inference import load_img_for_inference, load_video_for_inference
+from sfforecaster.inference import load_img_for_inference, load_video_for_inference, load_ts_for_inference
 
 from sfforecaster import logger
 
@@ -105,10 +107,10 @@ def get_args():
 	
 	# - Model options
 	parser.add_argument('-model', '--model', dest='model', required=False, type=str, default="google/siglip-so400m-patch14-384", action='store', help='Model pretrained file name or weight path to be loaded {google/siglip-large-patch16-256, google/siglip-base-patch16-256, google/siglip-base-patch16-256-i18n, google/siglip-so400m-patch14-384, google/siglip-base-patch16-224, MCG-NJU/videomae-base, MCG-NJU/videomae-large, OpenGVLab/VideoMAEv2-Large}')
-	parser.add_argument('--videoloader', dest='videoloader', action='store_true',help='Use video loader (default=false)')	
-	parser.set_defaults(videoloader=False)
 	parser.add_argument('--vitloader', dest='vitloader', action='store_true', help='If enabled use ViTForImageClassification to load model otherwise AutoModelForImageClassification (default=false)')	
 	parser.set_defaults(vitloader=False)
+	
+	parser.add_argument("--data_modality", dest='data_modality', type=str, choices=["image", "video", "ts"], default="image", help="Data modality model used")
 	
 	parser.add_argument('--use_model_processor', dest='use_model_processor', action='store_true', help='Use model image processor in data collator (default=false)')	
 	parser.set_defaults(use_model_processor=False)
@@ -157,9 +159,9 @@ def get_args():
 	
 	parser.add_argument('-metric_for_best_model', '--metric_for_best_model', dest='metric_for_best_model', required=False, type=str, default='tss', action='store', help='Metric used to select the best model (default=eval/tss)')
 	
+	parser.add_argument('-seed', '--seed', dest='seed', required=False, type=int, default=42, action='store',help='Random seed that will be set at the beginning of training (default=42)')
 	
 	# - Imbalanced trainer options
-	parser.add_argument("--use_custom_trainer", dest='use_custom_trainer', action="store_true", default=False, help="Use custom trainer (for imbalance).")
 	parser.add_argument("--use_weighted_loss", dest='use_weighted_loss', action="store_true", default=False, help="Use class-weighted loss (CE or focal alpha).")
 	parser.add_argument("--use_weighted_sampler", dest='use_weighted_sampler', action="store_true", default=False, help="Use a WeightedRandomSampler for training.")
 	parser.add_argument("--sample_weight_from_flareid", dest='sample_weight_from_flareid', action="store_true", default=False, help="Compute sample weights from flare id (mostly used for binary class).")
@@ -183,8 +185,8 @@ def get_args():
 	parser.add_argument("--compute_train_metrics", dest='compute_train_metrics', action="store_true", default=False, help="Compute and log train metrics during training.")
 		
 	# - Run options
-	parser.add_argument('-device', '--device', dest='device', required=False, type=str, default="cuda:0", action='store',help='Device identifier')
-	parser.add_argument('-runname', '--runname', dest='runname', required=False, type=str, default="llava_1.5_radio", action='store',help='Run name')
+	parser.add_argument('-device', '--device', dest='device', required=False, type=str, default="cuda:0", action='store', help='Device identifier')
+	parser.add_argument('-runname', '--runname', dest='runname', required=False, type=str, default="sfforecast", action='store', help='Run name')
 	parser.add_argument('--verbose', dest='verbose', action='store_true',help='Enable verbose printout (default=false)')	
 	parser.set_defaults(verbose=False)
 	
@@ -195,6 +197,10 @@ def get_args():
 	
 	parser.add_argument("--report_to", dest='report_to', type=str, default="wandb", help="Report logs/metrics to {wandb, none}")
 
+	parser.add_argument("--local_rank", type=int, default=int(os.environ.get("LOCAL_RANK", -1)))
+	parser.add_argument("--rank", type=int, default=int(os.environ.get("RANK", -1)))
+	parser.add_argument("--world_size", type=int, default=int(os.environ.get("WORLD_SIZE", -1)))
+
 	# - Output options
 	parser.add_argument('-outdir','--outdir', dest='outdir', required=False, default="", type=str, help='Output data dir') 
 	#parser.add_argument('--save_model_every_epoch', dest='save_model_every_epoch', action='store_true', help='Save model every epoch (default=false)')	
@@ -202,8 +208,11 @@ def get_args():
 	parser.add_argument('-max_checkpoints', '--max_checkpoints', dest='max_checkpoints', required=False, type=int, default=2, action='store',help='Max number of saved checkpoints (default=2)')
 	parser.add_argument('-outfile','--outfile', dest='outfile', required=False, default="classifier_results.json", type=str, help='Output file with saved inference results') 
 	
-	args = parser.parse_args()	
-
+	# - Parse arguments
+	#   NB: Accept unknown args so launchers can't break
+	#args = parser.parse_args()	
+	args, _unknown = parser.parse_known_args()
+	
 	return args		
 	
 	
@@ -426,6 +435,54 @@ def load_video_model(
 
 	return model, image_processor
 		
+	
+def load_ts_model(
+	args,
+	id2label,
+	label2id,
+	num_labels,
+	nclasses,
+	inference_mode=False
+):
+	"""Load Moirai model for time-series classification (Trainer-compatible)."""
+
+	if inference_mode:
+		# Load trained checkpoint (weights + config)
+		model = MoiraiForSequenceClassification.from_pretrained(args.model)
+		model.eval()
+	else:
+		# Ordinal variant (NOT IMPLEMENTED)
+		if args.ordinal:
+			raise ValueError("Ordinal head not yet implemented for time series data!")
+
+		else:
+			if args.binary:
+				# Start with a 2-class model
+				model = MoiraiForSequenceClassification.from_pretrained(
+					args.model,
+					num_labels=2
+				)
+        
+				# Replace head with 1 logit
+				in_features = model.head[-1].in_features
+				model.head[-1] = torch.nn.Linear(in_features, 1)
+				model.config.num_labels = 1
+				model.config.problem_type = None  # avoid HF inferring wrong loss
+            
+			else:
+				# Standard multiclass model
+				model = MoiraiForSequenceClassification.from_pretrained(
+					args.model,
+					num_labels=num_labels,
+					id2label=id2label,
+					label2id=label2id,
+				)
+
+	# No processor needed for TS (your TSDataCollator handles it)
+	ts_processor = None
+
+	return model, ts_processor
+	
 			
 def load_model(
 	args,
@@ -437,22 +494,33 @@ def load_model(
 ):
 	""" Load model & processor """
 	
-	if args.videoloader:
-		return load_video_model(args, id2label, label2id, num_labels, nclasses, inference_mode)
-	else:
+	if args.data_modality=="image":
 		return load_image_model(args, id2label, label2id, num_labels, nclasses, inference_mode)
+
+	elif args.data_modality=="video":
+		return load_video_model(args, id2label, label2id, num_labels, nclasses, inference_mode)
+		
+	elif args.data_modality=="ts":
+		return load_ts_model(args, id2label, label2id, num_labels, nclasses, inference_mode)
+		
+	else:
+		raise ValueError(f"Data modality {args.data_modality} not supported!")
 
 
 def freeze_model(model, args):
 	""" Freeze certain part of the model """
 	
 	# - Set encoder model name
-	if args.videoloader:
-		encoder_name= "encoder"
-		layer_search_pattern= "layer"
-	else:
+	if args.data_modality=="image":	
 		encoder_name= "vision_model.encoder"
 		layer_search_pattern= "layers"
+		
+	elif args.data_modality=="video":
+		encoder_name= "encoder"
+		layer_search_pattern= "layer"
+		
+	else: # Nothing to be done
+		return
 	
 	# - Freeze layers
 	logger.info("Freezing model base layers ...")
@@ -498,43 +566,23 @@ def load_video_transform(args, image_processor):
 	kernel_size= int(max(ksize, 5)) # in imgaug kernel_size viene calcolato automaticamente dalla sigma così, ma forse si può semplificare a 3x3
 	#blur_aug= T.GaussianBlur(kernel_size, sigma=(sigma_min, sigma_max))
 
-	if args.videoloader:
-		transform_train= T.Compose([
-			VideoResize(size, interpolation=T.InterpolationMode.BICUBIC),
-			VideoFlipping(),
-			VideoRotate90(),
-			VideoNormalize(mean=mean, std=std),
-		])
+	transform_train= T.Compose([
+		VideoResize(size, interpolation=T.InterpolationMode.BICUBIC),
+		VideoFlipping(),
+		VideoRotate90(),
+		VideoNormalize(mean=mean, std=std),
+	])
 		
-		transform= T.Compose([
-			VideoResize(size, interpolation=T.InterpolationMode.BICUBIC),
-			VideoNormalize(mean=mean, std=std),
-		])
-	
-	else:
-		transform_train = T.Compose(
-			[
-				T.Resize(size, interpolation=T.InterpolationMode.BICUBIC),
-				FlippingTransform(),
-				Rotate90Transform(),
-				#T.ToTensor(),
-				T.Normalize(mean=mean, std=std),
-			]
-		)
-	
-		transform = T.Compose(
-			[
-				T.Resize(size, interpolation=T.InterpolationMode.BICUBIC),
-				#T.ToTensor(),
-				T.Normalize(mean=mean, std=std),
-			]
-		)
+	transform= T.Compose([
+		VideoResize(size, interpolation=T.InterpolationMode.BICUBIC),
+		VideoNormalize(mean=mean, std=std),
+	])
 	
 	return transform_train, transform
 	
 
-def load_transform(args, image_processor):
-	""" Load data transform """
+def load_image_transform(args, image_processor):
+	""" Load image data transform """
 		
 	# - Retrieve image processor transform parameters
 	try:
@@ -584,8 +632,7 @@ def load_transform(args, image_processor):
 	
 	return transform_train, transform
 		
-		
-		
+
 ######################
 ##   LOAD DATASET   ##
 ######################
@@ -601,11 +648,15 @@ def load_dataset(
 	#==   CREATE DATA TRANSFORMS
 	#====================================
 	# - Load data transforms
-	if args.videoloader:
+	if args.data_modality=="image":
+		transform_train, transform_valtest= load_image_transform(args, image_processor)
+	elif args.data_modality=="video":
 		transform_train, transform_valtest= load_video_transform(args, image_processor)
+	elif args.data_modality=="ts":
+		raise ValueError("IMPLEMENT DATA TRANSFORMS FOR TIME SERIES!")
 	else:
-		transform_train, transform_valtest= load_transform(args, image_processor)
-	
+		raise ValueError(f"Data modality {args.data_modality} not supported!")
+		
 	#====================================
 	#==   CREATE DATASET
 	#====================================
@@ -615,10 +666,15 @@ def load_dataset(
 	nsamples= 0
 	nsamples_cv= 0
 	DatasetClass= None
-	if args.videoloader:
-		DatasetClass= VideoDataset
-	else:
+	
+	if args.data_modality=="image":
 		DatasetClass= ImgDataset
+	elif args.data_modality=="video":
+		DatasetClass= VideoDataset
+	elif args.data_modality=="ts":
+		DatasetClass= TSDataset
+	else:
+		raise ValueError(f"Data modality {args.data_modality} not supported!")
 	
 	transform= transform_train
 	if args.predict or args.test:
@@ -703,7 +759,7 @@ def load_training_opts(args):
 		output_dir=output_dir,
 		do_train=True if not args.test else False,
 		do_eval=True if not args.test and args.datalist_cv!="" else False,
-		do_predict=True if run_test else False,
+		do_predict=True if args.test else False,
 		num_train_epochs=args.nepochs,
 		optim="adamw_torch",
 		lr_scheduler_type=args.lr_scheduler,
@@ -735,6 +791,7 @@ def load_training_opts(args):
 		run_name=args.runname,
     #report_to="wandb",  # enable logging to W&B
     report_to=args.report_to,
+    seed=args.seed,
 		#dataloader_num_workers=0,
 		#dataloader_pin_memory=False,
 		#dataloader_persistent_workers=False
@@ -781,12 +838,13 @@ def run_predict(
 	dataset,
 	args,
 	id2label,
-	image_processor=None
+	image_processor=None,
+	device="cuda:0"
 ):
 	""" Run model predict """
 	
-	device_choice= args.device
-	device = torch.device(device_choice if torch.cuda.is_available() else "cpu")
+	#device_choice= args.device
+	#device = torch.device(device_choice if torch.cuda.is_available() else "cpu")
 
 	inference_results= {"data": []}
 	nsamples= dataset.get_sample_size()
@@ -802,21 +860,7 @@ def run_predict(
 			sname= image_info["sname"]
 			
 		# - Load image/video 
-		#if args.videoloader:
-		#	input_tensor= dataset.load_video(i)
-		#else: 
-		#	input_tensor= dataset.load_image(i)
-		
-		if args.videoloader:
-			input_tensor= load_video_for_inference(
-				dataset=dataset, 
-				idx=i, 
-				processor=image_processor if args.use_model_processor else None, 
-				do_resize=image_processor.do_resize if args.use_model_processor else False,                   # set to True only if processor should resize
-				do_normalize=image_processor.do_normalize if args.use_model_processor else False,              # set to True only if processor should normalize
-				do_rescale=image_processor.do_rescale if args.use_model_processor else False                  # set to True only if processor should rescale
-			)
-		else:
+		if args.data_modality=="image":
 			input_tensor= load_img_for_inference(
 				dataset=dataset, 
 				idx=i, 
@@ -825,7 +869,23 @@ def run_predict(
 				do_normalize=image_processor.do_normalize if args.use_model_processor else False,              # set to True only if processor should normalize
 				do_rescale=image_processor.do_rescale if args.use_model_processor else False                  # set to True only if processor should rescale
 			)
-		
+		elif args.data_modality=="video":
+			input_tensor= load_video_for_inference(
+				dataset=dataset, 
+				idx=i, 
+				processor=image_processor if args.use_model_processor else None, 
+				do_resize=image_processor.do_resize if args.use_model_processor else False,                   # set to True only if processor should resize
+				do_normalize=image_processor.do_normalize if args.use_model_processor else False,              # set to True only if processor should normalize
+				do_rescale=image_processor.do_rescale if args.use_model_processor else False                  # set to True only if processor should rescale
+			)
+		elif args.data_modality=="ts":
+			input_tensor= load_ts_for_inference(
+				dataset=dataset, 
+				idx=i
+			)
+		else:
+			raise ValueError(f"Data modality {args.data_modality} not supported!")
+			
 		if input_tensor is None:
 			logger.warning("Skip None tensor at index %d ..." % (i))
 			continue
@@ -1013,21 +1073,27 @@ def main():
 	#===========================
 	#==   PARSE ARGS
 	#===========================
-	logger.info("Get script args ...")
+	logger.info("Parse and retrieve input script args ...")
 	try:
 		args= get_args()
 	except Exception as ex:
-		logger.error("Failed to get and parse options (err=%s)",str(ex))
+		logger.error("Failed to get and parse options (err=%s)", str(ex))
 		return 1
 
 	# - Read args
 	datalist= args.datalist
-	videoloader= args.videoloader
 
 	# - Run options
-	device_choice= args.device
-	device = torch.device(device_choice if torch.cuda.is_available() else "cpu")
+	#device_choice= args.device
+	#device = torch.device(device_choice if torch.cuda.is_available() else "cpu")
 	
+	local_rank = args.local_rank if args.local_rank != -1 else int(os.environ.get("LOCAL_RANK", -1))
+	if local_rank != -1:
+		device_choice = f"cuda:{local_rank}"
+	else:
+		device_choice = args.device
+	device = torch.device(device_choice if torch.cuda.is_available() else "cpu")
+
 	# - Model options
 	modelname= args.model
 	multiout= args.multiout
@@ -1093,30 +1159,8 @@ def main():
 		id2target
 	)
 	
-	# - Create collator fcn
-	#def collate_fn(batch):
-	#	pixel_values= []
-	#	labels= []
-	#	for item in batch:
-	#		if item[0] is None:
-	#			continue
-	#		pixel_values.append(item[0])
-	#		labels.append(item[1])
-			
-	#	pixel_values= torch.stack(pixel_values)
-	#	labels= torch.stack(labels)
-	#	return {"pixel_values": pixel_values, "labels": labels}
-		
 	# - Create data collators
-	if args.videoloader:
-		data_collator= VideoDataCollator(
-			image_processor=image_processor if args.use_model_processor else None, 
-			do_resize=image_processor.do_resize if args.use_model_processor else False,                   # set to True only if processor should resize
-			do_normalize=image_processor.do_normalize if args.use_model_processor else False,              # set to True only if processor should normalize
-			do_rescale=image_processor.do_rescale if args.use_model_processor else False                  # set to True only if processor should rescale
-		)
-	
-	else:
+	if args.data_modality=="image":
 		data_collator= ImgDataCollator(
 			image_processor=image_processor if args.use_model_processor else None, 
 			do_resize=image_processor.do_resize if args.use_model_processor else False,                   # set to True only if processor should resize
@@ -1124,6 +1168,20 @@ def main():
 			do_rescale=image_processor.do_rescale if args.use_model_processor else False                  # set to True only if processor should rescale
 		)
 	
+	elif args.data_modality=="video":
+		data_collator= VideoDataCollator(
+			image_processor=image_processor if args.use_model_processor else None, 
+			do_resize=image_processor.do_resize if args.use_model_processor else False,                   # set to True only if processor should resize
+			do_normalize=image_processor.do_normalize if args.use_model_processor else False,              # set to True only if processor should normalize
+			do_rescale=image_processor.do_rescale if args.use_model_processor else False                  # set to True only if processor should rescale
+		)
+	
+	elif args.data_modality=="ts":
+		data_collator= TSDataCollator()
+	
+	else:
+		raise ValueError(f"Data modality {args.data_modality} not supported!")
+				
 	#######################################
 	##     SET TRAINER
 	#######################################
@@ -1180,7 +1238,8 @@ def main():
 			id2target=id2target, 
 			eps=1e-12, 
 			clip_max=200, # clip if a class is missing otherwise pos weights becomes huge
-			device="cuda" if torch.cuda.is_available() else "cpu"
+			#device="cuda" if torch.cuda.is_available() else "cpu"
+			device=device
 		)
 		print("--> ORDINAL POS WEIGHTS")
 		print(ordinal_pos_weights)
@@ -1220,7 +1279,8 @@ def main():
     		id2target=id2target,
 				exponent=0.5,
 				cap_ratio=10.0,
-				device="cuda" if torch.cuda.is_available() else "cpu"
+				#device="cuda" if torch.cuda.is_available() else "cpu"
+				device=device
 			)
 		else:
 			logger.info("Setting focal alpha to class_weights if not None ...")
@@ -1248,7 +1308,6 @@ def main():
 	print("model.config.label2id:", model.config.label2id)
 		
 	# - Set trainer
-	#if args.use_custom_trainer:
 	logger.info("Using custom trainer ...")
 	trainer = CustomTrainer(
 		model=model,
@@ -1273,26 +1332,12 @@ def main():
 		ordinal_pos_weights=ordinal_pos_weights,
 		compute_train_metrics=args.compute_train_metrics,
 		binary_pos_weights=class_weights_binary,
-		#binary_sample_weights=sample_weights_binary,
 		verbose=args.verbose
 	)
 		
 	if args.compute_train_metrics:
 		trainer.add_callback(TrainMetricsCallback(trainer))
 		
-	#else:
-	#	logger.info("Using standard trainer ...")
-	#	trainer = Trainer(
-	#		model=model,
-	#		args=training_opts,
-	#		train_dataset=dataset,
-	#		eval_dataset=dataset_cv,
-	#		compute_metrics=compute_metrics_custom,		
-	#		processing_class=image_processor,
-	#		#data_collator=collate_fn,
-	#		data_collator=data_collator,
-	#	)
-	
 	#######################################
 	##     RUN TEST
 	#######################################		
@@ -1307,7 +1352,7 @@ def main():
 	# - Run predict
 	elif args.predict:
 		logger.info("Running model inference on input data %s ..." % (args.datalist))
-		run_predict(model, dataset, args, id2label, image_processor)
+		run_predict(model, dataset, args, id2label, image_processor, device=device)
 	
 	################################
 	##    TRAIN

@@ -181,6 +181,57 @@ class VideoDataCollator:
 		return {"pixel_values": pixel_values, "labels": labels}	
 		
 
+
+class TSDataCollator:
+	def __init__(self):
+		
+	def __call__(self, batch):	
+		
+		# - Collect batch items
+		ts_list, label_list = [], []
+		
+		for item in batch:
+			if isinstance(item, dict):
+				ts = item.get("input", item.get("input"))
+				lab = item.get("labels", item.get("label"))
+			else:  # tuple/list
+				if not item or item[0] is None:
+					continue
+				ts, lab = item[0], item[1]
+
+			if ts is None:
+				continue
+			
+			ts_list.append(ts)
+			label_list.append(lab)
+	
+		if len(ts_list) == 0:
+			# Edge case: all items were None — return empty batch tensors
+			return {
+				"input": torch.empty(0),
+				"labels": torch.empty(0, dtype=torch.long)
+			}
+			
+		# - Apply here model processor logic (if any processor)
+		# ...
+		# ...	
+			
+		# - Set features
+		features = torch.stack(ts_list, dim=0)
+		
+		# - Set labels
+		labels= torch.stack(label_list)
+		
+		# - Check if any NaN in pixel_values
+		if torch.isnan(features).any():
+			print("⚠️ NaN values detected in batch tensor!")
+
+		if torch.isinf(features).any():
+			print("⚠️ Inf values detected in batch tensor!")
+		
+		return {"input": features, "labels": labels}	
+		
+	
 ##########################################
 ##    FOCAL LOSS
 ##########################################
@@ -666,15 +717,21 @@ class CustomTrainer(Trainer):
 	def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
 		""" Override trainer compute_loss function """
 		
-		pixel_values = inputs.get("pixel_values")
+		# - Retrieve features & labels
+		#pixel_values = inputs.get("pixel_values")
+		features = inputs.get("pixel_values", None)
+		if features is None:
+			features = inputs.get("input", None)  # <-- time series
+        
 		labels = inputs.get("labels")
-		outputs = model(pixel_values)
-		#labels = inputs.pop("labels")
-		#outputs = model(**inputs)
+		#outputs = model(pixel_values)
+		outputs = model(features)
+		###labels = inputs.pop("labels")
+		###outputs = model(**inputs)
 		logits = outputs.logits
 		
-		if torch.isnan(pixel_values).any() or torch.isinf(pixel_values).any():
-			print("⚠️ NaN values detected in batch pixel_values tensor!")
+		if torch.isnan(features).any() or torch.isinf(features).any():
+			print("⚠️ NaN values detected in batch features tensor!")
 			
 		if torch.isnan(labels).any() or torch.isinf(labels).any():
 			print("⚠️ NaN values detected in batch label tensor!")

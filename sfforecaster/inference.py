@@ -86,6 +86,25 @@ def load_video_for_inference(
 		
 	return pixel_values
 	
+	
+##############################
+###   TIME-SERIES LOAD
+##############################
+def load_ts_for_inference(
+	dataset, idx, 
+):
+	""" Load time series data for inference """
+	
+	# - Load image from dataset
+	#   NB: This returns a Tensor of Shape [C,H,W] with transforms applied (if dataset has transform)
+	input_tensor= dataset.load_ts_tensor(idx)
+	
+	# - Add batch dim for inference
+	pixel_values= input_tensor.unsqueeze(0)
+	
+	return pixel_values
+	
+	
 ###################################
 ##  ORDINAL HELPERS
 ###################################
