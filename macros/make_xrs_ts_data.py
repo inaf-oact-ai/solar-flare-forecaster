@@ -590,13 +590,13 @@ def compute_series_for_sat(sat, args, events_df, flat_writer):
 		# ---- Append to json output ----
 		t_data_start= start.strftime("%Y-%m-%d %H:%M:%S")
 		t_data_end= end.strftime("%Y-%m-%d %H:%M:%S")
-		t_data_start_posix= t_data_start.timestamp() # number of seconds since Unix epoch (January 1, 1970)
-		t_data_end_posix= t_data_end.timestamp() # number of seconds since Unix epoch (January 1, 1970)
+		t_data_start_posix= start.timestamp() # number of seconds since Unix epoch (January 1, 1970)
+		t_data_end_posix= end.timestamp() # number of seconds since Unix epoch (January 1, 1970)
 		dt= one.total_seconds()
 		t_forecast_start= label_start.strftime("%Y-%m-%d %H:%M:%S")
 		t_forecast_end= label_end.strftime("%Y-%m-%d %H:%M:%S")
-		t_forecast_start_posix= t_forecast_start.timestamp() # number of seconds since Unix epoch (January 1, 1970)
-		t_forecast_end_posix= t_forecast_end.timestamp() # number of seconds since Unix epoch (January 1, 1970)
+		t_forecast_start_posix= label_start.timestamp() # number of seconds since Unix epoch (January 1, 1970)
+		t_forecast_end_posix= label_end.timestamp() # number of seconds since Unix epoch (January 1, 1970)
 		xrf_flux_ratio_data= ratio.values.astype("float32")
 		
 		outdict= {
