@@ -619,7 +619,7 @@ def compute_series_for_sat(sat, args, events_df, flat_writer):
 		}
 		
 		if args.emit_history_channel and (hist is not None):
-			flare_hist_data= flare_hist_data.values.astype("float32")
+			flare_hist_data= hist.values.astype("float32")
 			outdict["flare_hist"]= list(flare_hist_data)
 		
 		outdict_list.append(outdict)
