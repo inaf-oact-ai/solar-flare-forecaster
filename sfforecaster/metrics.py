@@ -589,11 +589,11 @@ def single_label_metrics(predictions, labels, target_names=None, chunk_size=64):
 	GSS= (TP- ( ((TP+FN)*(TP+FP))/(TP+FP+TN+FN) ) )/( (TP+FP+FN) - ( ((TP+FN)*(TP+FP))/(TP+FP+TN+FN) ) )
 	
 	# - Compute Matthew’s correlation coefficient (MCC) (CHECK!!!)
-	#MCC= ((TP*TN)-(FP*FN))/np.sqrt( (TP+FP)*(TP+FN)*(TP+FP)*(TN+FN) ) # WRONG in https://arxiv.org/pdf/2408.05590v1 ?
-	MCC= ((TP*TN)-(FP*FN))/np.sqrt( (TP+FP)*(TP+FN)*(TN+FP)*(TN+FN) )
+	####MCC= ((TP*TN)-(FP*FN))/np.sqrt( (TP+FP)*(TP+FN)*(TP+FP)*(TN+FN) ) # WRONG in https://arxiv.org/pdf/2408.05590v1 ?
+	#MCC= ((TP*TN)-(FP*FN))/np.sqrt( (TP+FP)*(TP+FN)*(TN+FP)*(TN+FN) )
 	MCC_coeff= matthews_corrcoef(y_true=y_true, y_pred=y_pred)
 			
-	print(f"FP={FP}, FN={FN}, TP={TP}, TN={TN}, ACC={ACC}, accuracy={accuracy}, TSS={TSS}, HSS={HSS}, GSS={GSS}, MCC={MCC}, MCC_coeff={MCC_coeff}")
+	print(f"FP={FP}, FN={FN}, TP={TP}, TN={TN}, ACC={ACC}, accuracy={accuracy}, TSS={TSS}, HSS={HSS}, GSS={GSS}, MCC_coeff={MCC_coeff}")
 	
 	# - Compute summary metrics
 	if not binary_class:
