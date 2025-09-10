@@ -527,7 +527,7 @@ def compute_series_for_sat(sat, args, events_df, flat_writer):
 
 		label = choose_label(occ["class"].tolist())
 		label_final= remap_label(label)
-		id_final= LABEL2ID(label)
+		id_final= LABEL2ID[label]
 		
 		# - Compute flare binary status time series?
 		hist = None
