@@ -616,7 +616,7 @@ def compute_series_for_sat(sat, args, events_df, flat_writer):
       "date_forecast_end": str(t_forecast_end),
       "t_forecast_start": float(t_forecast_start_posix),
       "t_forecast_end": float(t_forecast_end_posix),
-      "xrs_flux_ratio": [float(item) for item xrf_flux_ratio_data] 	
+      "xrs_flux_ratio": [float(item) for item in xrf_flux_ratio_data] 	
 		}
 		
 		if args.emit_history_channel and (hist is not None):
