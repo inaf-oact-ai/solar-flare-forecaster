@@ -611,8 +611,8 @@ def compute_series_for_sat(sat, args, events_df, flat_writer):
       "date_start": str(t_data_start),
       "date_end": str(t_data_end),
       "dt": float(dt),
-      "date_forecast_start": str(date_forecast_start),
-      "date_forecast_end": str(date_forecast_end),
+      "date_forecast_start": str(t_forecast_start),
+      "date_forecast_end": str(t_forecast_end),
       "t_forecast_start": float(t_forecast_start_posix),
       "t_forecast_end": float(t_forecast_end_posix),
       "xrs_flux_ratio": list(xrf_flux_ratio_data) 	
