@@ -622,6 +622,7 @@ def compute_series_for_sat(sat, args, events_df, flat_writer):
 			flare_hist_data= hist.values.astype("float32")
 			outdict["flare_hist"]= list(flare_hist_data)
 		
+		print("Saving json data ...")
 		outdict_list.append(outdict)
 		
 		# ---- Index/metadata row ----     
