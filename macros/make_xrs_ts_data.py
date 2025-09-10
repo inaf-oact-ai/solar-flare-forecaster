@@ -598,7 +598,7 @@ def compute_series_for_sat(sat, args, events_df, flat_writer):
 		t_forecast_end= label_end.strftime("%Y-%m-%d %H:%M:%S")
 		t_forecast_start_posix= label_start.timestamp() # number of seconds since Unix epoch (January 1, 1970)
 		t_forecast_end_posix= label_end.timestamp() # number of seconds since Unix epoch (January 1, 1970)
-		xrf_flux_ratio_data= ratio.values.astype("float32")
+		xrf_flux_ratio_data= list(ratio.values.astype("float32"))
 		
 		outdict= {
 			"satellite": sat_name,
@@ -616,12 +616,12 @@ def compute_series_for_sat(sat, args, events_df, flat_writer):
       "date_forecast_end": str(t_forecast_end),
       "t_forecast_start": float(t_forecast_start_posix),
       "t_forecast_end": float(t_forecast_end_posix),
-      "xrs_flux_ratio": list(xrf_flux_ratio_data) 	
+      "xrs_flux_ratio": [float(item) for item xrf_flux_ratio_data] 	
 		}
 		
 		if args.emit_history_channel and (hist is not None):
-			flare_hist_data= hist.values.astype("float32")
-			outdict["flare_hist"]= list(flare_hist_data)
+			flare_hist_data= list(hist.values.astype("float32"))
+			outdict["flare_hist"]= [float(item) for item in flare_hist_data]
 		
 		print("Saving json data ...")
 		outdict_list.append(outdict)
