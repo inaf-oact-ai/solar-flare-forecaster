@@ -174,8 +174,8 @@ class BaseDataset(Dataset):
 		scheme="balanced", 
 		normalize=True,
 		binary=False,
-    positive_label=1,
-    laplace=1.0
+		positive_label=1,
+		laplace=1.0
 	):
 		""" Compute class weights from dataset """
     

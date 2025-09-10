@@ -183,7 +183,7 @@ class VideoDataCollator:
 
 
 class TSDataCollator:
-	def __init__(self):
+	#def __init__(self):
 		
 	def __call__(self, batch):	
 		

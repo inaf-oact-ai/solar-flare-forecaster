@@ -155,7 +155,7 @@ class MultiHorizonViT(ViTForImageClassification):
 			"logits": logits  # list of tensors [B, num_classes]
 		}		
 		
-
+		
 ##############################################
 ###     TIME-SERIES CLASSIFICATION MODEL
 ##############################################    
