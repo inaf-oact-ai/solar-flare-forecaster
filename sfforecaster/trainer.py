@@ -854,11 +854,11 @@ class CustomTrainer(Trainer):
 		return (loss, outputs) if return_outputs else loss
 
 	
-	def _get_train_sampler(self):
+	def _get_train_sampler(self, *args, **kwargs):
 		# When we build our own weighted sampler, do not let HF create another one.
 		if self.sample_weights is not None:
 			return None
-		return super()._get_train_sampler()
+		return super()._get_train_sampler(*args, **kwargs)
 		
 
 	def get_train_dataloader(self):
