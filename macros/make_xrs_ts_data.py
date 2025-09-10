@@ -31,6 +31,7 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 import re
+import json
 
 COMMON_TIME_NAMES = ["time", "timestamp", "datetime", "date_time"]
 SCIENCE_NAME_CANDIDATES = {
