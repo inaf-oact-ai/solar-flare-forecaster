@@ -1018,6 +1018,7 @@ def run_train(
 	
 	# - Ensure all ranks finished training & any internal saves
 	is_main = bool(trainer.args.should_save)
+	out_dir = Path(trainer.args.output_dir)
 	final_done = out_dir / ".final_done"
 	best_done  = out_dir / ".best_done"
 	#barrier_if_distributed()
@@ -1033,8 +1034,6 @@ def run_train(
 	
 	# - Only the main process should create/update links
 	if is_main:
-		out_dir = Path(trainer.args.output_dir)
-
 		# - Link/copy "final" to the last checkpoint (if any), else to current model dir
 		last_ckpt = find_last_checkpoint(out_dir) 
 		if last_ckpt is None:
