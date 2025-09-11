@@ -1016,38 +1016,50 @@ def run_train(
 	#train_result = trainer.train(resume_from_checkpoint=checkpoint)
 	train_result = trainer.train()
 	
+	# - Ensure all ranks finished training & any internal saves
+	barrier_if_distributed()
+	
 	# - Save final model explicitly (if save_strategy is set to no)
-	if trainer.args.save_strategy == "no":
+	if trainer.args.should_save and trainer.args.save_strategy == "no":
 		logger.info("Saving trained model ...")	
-		trainer.save_model()
+		trainer.save_model() # HF guards internally; only rank 0 writes	
 		#trainer.save_model(trainer.args.output_dir)
 		
-	# - Always simlink/copy last remaining checkpoint
-	out_dir = Path(trainer.args.output_dir)
-	last_ckpt = find_last_checkpoint(out_dir)
-	if last_ckpt is None:
-		logger.warning("⚠️ No checkpoints found under output_dir; nothing to link as 'final'. Did you set save_strategy='epoch'?")
-	else:
-		make_link_or_copy(last_ckpt, out_dir / "final")
+	# - Wait so other ranks don't race reading/checking directories
+	barrier_if_distributed()
+	
+	# - Only the main process should create/update links
+	if trainer.args.should_save:
+		out_dir = Path(trainer.args.output_dir)
 
-	# - Save best model
-	#   NB: only if a validation run occurred and a best checkpoint exists
-	try:
-		did_validation = (args.datalist_cv != "")
-	except NameError:
-		# If 'args' is not in scope, fall back to Trainer flags
-		did_validation = bool(getattr(trainer.args, "load_best_model_at_end", False))
-
-	best_ckpt_path = getattr(trainer.state, "best_model_checkpoint", None)
-
-	if did_validation and best_ckpt_path:
-		best_ckpt = Path(best_ckpt_path)
-		if best_ckpt.exists():
-			make_link_or_copy(best_ckpt, out_dir / "best")
+		# - Link/copy "final" to the last checkpoint (if any), else to current model dir
+		last_ckpt = find_last_checkpoint(out_dir) 
+		if last_ckpt is None:
+			# No checkpoints (e.g., save_strategy="no"): point "final" to current model dir
+			logger.warning("⚠️ No checkpoints (e.g., save_strategy='no'): point 'final' to current model dir ...")
+			safe_link_or_copy(out_dir, out_dir / "final")
 		else:
-			logger.warning(f"⚠️ Best checkpoint reported but not found on disk: {best_ckpt}")
-	else:
-		logger.info("ℹ️ No validation detected or no best checkpoint available; skipping 'best' link.")
+			safe_link_or_copy(last_ckpt, out_dir / "final")
+
+		# - Best checkpoint link (only if validation happened and path exists)
+		best_ckpt_path = getattr(trainer.state, "best_model_checkpoint", None)
+		try:
+			did_validation = (args.datalist_cv != "")
+		except NameError:
+			# If 'args' is not in scope, fall back to Trainer flags
+			did_validation = bool(getattr(trainer.args, "load_best_model_at_end", False))
+		
+		if did_validation and best_ckpt_path:
+			best_ckpt = Path(best_ckpt_path)
+			if best_ckpt.exists():
+				safe_link_or_copy(best_ckpt, out_dir / "best")
+			else:
+				logger.warning(f"⚠️ Best checkpoint reported but not found on disk: {best_ckpt}")
+		else:
+			logger.info("ℹ️ No validation detected or no best checkpoint available; skipping 'best' link.")
+		
+	# - Final barrier so all ranks see consistent fs state before program exit
+	barrier_if_distributed()
 	
 	# - Save metrics
 	logger.info("Saving train metrics ...")        

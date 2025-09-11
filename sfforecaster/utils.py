@@ -44,6 +44,7 @@ from PIL import Image
 import torch
 import torchvision.transforms as T
 from torchvision.transforms.functional import InterpolationMode
+import torch.distributed as dist
 
 ## DRAW MODULES
 import matplotlib.pyplot as plt
@@ -64,6 +65,29 @@ def extract_layer_id(name: str, pattern: str="layers") -> int:
 		return -1
 	return int(match.group(1))
 	
+def find_last_checkpoint(root: Path) -> Path | None:
+	"""Pick the latest checkpoint-* folder. Prefer the largest step number; fallback to mtime."""
+	ckpts = [p for p in root.glob("checkpoint-*") if p.is_dir()]
+	if not ckpts:
+		return None
+	def step_num(p: Path):
+		m = re.search(r"checkpoint-(\d+)", p.name)
+		return int(m.group(1)) if m else -1
+	# Prefer by step number if available
+	ckpts_by_step = sorted(ckpts, key=step_num)
+	if step_num(ckpts_by_step[-1]) >= 0:
+		return ckpts_by_step[-1]
+	# Fallback by modification time
+	return max(ckpts, key=lambda p: p.stat().st_mtime)
+
+def barrier_if_distributed():
+	# Safe barrier: only if torch.distributed is initialized
+	if dist.is_available() and dist.is_initialized():
+		dist.barrier()
+
+##########################
+##     OS UTILS
+##########################
 def safe_remove_path(p: Path):
 	"""Remove existing symlink or directory/file at p (if present)."""
 	if not p.exists() and not p.is_symlink():
@@ -87,23 +111,46 @@ def make_link_or_copy(src: Path, dst: Path):
 		shutil.copytree(src, dst)
 		logger.info(f"📁 Copied: {dst} (from {src})")
 
-def find_last_checkpoint(root: Path) -> Path | None:
-	"""Pick the latest checkpoint-* folder. Prefer the largest step number; fallback to mtime."""
-	ckpts = [p for p in root.glob("checkpoint-*") if p.is_dir()]
-	if not ckpts:
-		return None
-	def step_num(p: Path):
-		m = re.search(r"checkpoint-(\d+)", p.name)
-		return int(m.group(1)) if m else -1
-	# Prefer by step number if available
-	ckpts_by_step = sorted(ckpts, key=step_num)
-	if step_num(ckpts_by_step[-1]) >= 0:
-		return ckpts_by_step[-1]
-	# Fallback by modification time
-	return max(ckpts, key=lambda p: p.stat().st_mtime)
+def safe_link_or_copy(src: Path, dst: Path):
+	"""
+		Atomically create/replace dst with a symlink to src, falling back to copy if symlink fails.
+		Works whether src is a file or directory.
+	"""
+	src = Path(src)
+	dst = Path(dst)
+	tmp = dst.with_name(dst.name + f".tmp.{os.getpid()}.{time.time_ns()}")
+
+	# Remove pre-existing tmp (very unlikely) and make sure parent exists
+	with suppress(FileNotFoundError):
+		if tmp.is_symlink() or tmp.exists():
+			tmp.unlink() if tmp.is_symlink() else shutil.rmtree(tmp)
+	dst.parent.mkdir(parents=True, exist_ok=True)
+
+	try:
+		# Try symlink first (fast and space-efficient)
+		os.symlink(src, tmp, target_is_directory=src.is_dir())
+		os.replace(tmp, dst)  # atomic on POSIX
+	except OSError:
+		# Fallback: copy (handle existing dst)
+		if dst.exists() or dst.is_symlink():
+			if dst.is_symlink():
+				dst.unlink()
+			else:
+				shutil.rmtree(dst)
+		if src.is_dir():
+			shutil.copytree(src, dst)
+		else:
+			shutil.copy2(src, dst)
+        
+		# Clean up tmp if it exists
+		with suppress(FileNotFoundError):
+			if tmp.is_symlink():
+				tmp.unlink()
+			elif tmp.exists():
+				shutil.rmtree(tmp)
 
 ##########################
-##    DATA UTILS
+##    DATA IO UTILS
 ##########################
 def read_datalist(filename, key="data"):
 	""" Read data json file """
