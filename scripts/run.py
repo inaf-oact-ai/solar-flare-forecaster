@@ -1235,7 +1235,8 @@ def main():
 			num_classes=num_labels, 
 			id2target=id2target,
 			scheme=args.weight_compute_mode,
-			normalize=args.normalize_weights
+			normalize=args.normalize_weights,
+			binary=False
 		)
 		print("--> CLASS WEIGHTS")
 		print(class_weights)
@@ -1248,9 +1249,11 @@ def main():
 				id2target=id2target,
 				scheme=args.weight_compute_mode,
 				normalize=args.normalize_weights,
+				binary=True,
 				positive_label=1, 
 				laplace=1.0
 			)
+			
 			print("--> BINARY CLASS WEIGHTS")
 			print(class_weights_binary)
 		
