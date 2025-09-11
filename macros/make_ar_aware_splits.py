@@ -32,6 +32,86 @@ def summarize_by_label(items: List[dict]) -> Dict[str, int]:
         cnt[str(it.get("label", ""))] += 1
     return dict(cnt)
 
+def collapse_label(label: str) -> str:
+    """
+    Collapse labels into coarse buckets:
+      - 'NONE'  : if label contains 'NONE'
+      - 'M+'    : labels starting with M or X, or containing 'M+' or 'X+'
+      - 'OTHER' : everything else (e.g., A/B/C/C+ etc.)
+    Adjust as needed for your taxonomy.
+    """
+    s = str(label).upper().strip()
+    if "NONE" in s:
+        return "NONE"
+    if s.startswith("M") or s.startswith("X") or "M+" in s or "X+" in s:
+        return "M+"
+    return "OTHER"
+
+
+def summarize_counts_and_fracs(items: List[dict]) -> Dict[str, Tuple[int, float]]:
+    cnt = Counter()
+    for it in items:
+        cnt[str(it.get("label", ""))] += 1
+    total = sum(cnt.values())
+    if total == 0:
+        return {}
+    return {k: (v, v / total) for k, v in cnt.items()}
+
+
+def summarize_collapsed_counts_and_fracs(items: List[dict]) -> Dict[str, Tuple[int, float]]:
+    cnt = Counter()
+    for it in items:
+        bucket = collapse_label(it.get("label", ""))
+        cnt[bucket] += 1
+    total = sum(cnt.values())
+    if total == 0:
+        return {}
+    return {k: (v, v / total) for k, v in cnt.items()}
+
+
+def render_comp_table(split_name: str,
+                      orig_stats: Dict[str, Tuple[int, float]],
+                      new_stats: Dict[str, Tuple[int, float]]) -> List[str]:
+    """
+    Render a side-by-side counts/fractions table for a split.
+    """
+    labels = sorted(set(orig_stats.keys()) | set(new_stats.keys()),
+                    key=lambda k: (-orig_stats.get(k, (0,0.0))[0], k))
+    lines = []
+    lines.append(f"[{split_name}] Per-label composition (original vs new):")
+    lines.append("  label                 |  orig_n   orig_%   |   new_n    new_%   |  Δn     Δ%")
+    lines.append("  ----------------------|---------------------|---------------------|----------------")
+    for lab in labels:
+        on, of = orig_stats.get(lab, (0, 0.0))
+        nn, nf = new_stats.get(lab, (0, 0.0))
+        dn = nn - on
+        df = nf - of
+        lines.append(f"  {lab:<22} | {on:7d}  {of:6.2%} | {nn:7d}  {nf:6.2%} | {dn:+6d}  {df:+6.2%}")
+    lines.append("")
+    return lines
+
+
+def render_collapsed_comp(split_name: str,
+                          orig_stats: Dict[str, Tuple[int, float]],
+                          new_stats: Dict[str, Tuple[int, float]]) -> List[str]:
+    """
+    Render collapsed (NONE, M+, OTHER) comparison for a split.
+    """
+    buckets = ["NONE", "M+", "OTHER"]
+    lines = []
+    lines.append(f"[{split_name}] Collapsed composition (NONE vs M+ vs OTHER):")
+    lines.append("  bucket                |  orig_n   orig_%   |   new_n    new_%   |  Δn     Δ%")
+    lines.append("  ----------------------|---------------------|---------------------|----------------")
+    for b in buckets:
+        on, of = orig_stats.get(b, (0, 0.0))
+        nn, nf = new_stats.get(b, (0, 0.0))
+        dn = nn - on
+        df = nf - of
+        lines.append(f"  {b:<22} | {on:7d}  {of:6.2%} | {nn:7d}  {nf:6.2%} | {dn:+6d}  {df:+6.2%}")
+    lines.append("")
+    return lines
+
+
 def group_by_ar(items: List[dict]) -> Dict[str, List[dict]]:
     groups = defaultdict(list)
     for it in items:
@@ -179,10 +259,12 @@ def make_summary_text(
     seed: int,
     original_counts: Dict[str, int],
     targets: Dict[str, int],
-    splits: Dict[str, List[dict]]
+    splits: Dict[str, List[dict]],
+    orig_splits: Dict[str, List[dict]],
 ) -> str:
     lines = []
     lines.append(f"=== AR-aware Split Summary (seed={seed}) ===\n")
+
     lines.append("Original sizes:")
     for s in SPLITS:
         lines.append(f"  {s:>5s}: {original_counts[s]}")
@@ -193,7 +275,9 @@ def make_summary_text(
     for s in SPLITS:
         lines.append(f"  {s:>5s}: {len(splits[s])}   (Δ={len(splits[s]) - targets[s]:+d})")
     lines.append("")
-    lines.append("Label breakdown per split:")
+
+    # Old (single set) breakdown kept for quick glance
+    lines.append("Label breakdown per NEW split:")
     for s in SPLITS:
         cnt = summarize_by_label(splits[s])
         total = sum(cnt.values())
@@ -202,6 +286,20 @@ def make_summary_text(
             frac = v / total if total else 0.0
             lines.append(f"    - {k}: {v} ({frac:.2%})")
     lines.append("")
+
+    # === NEW: side-by-side comparison ===
+    lines.append("=== Class composition comparison (original vs new) ===")
+    for s in SPLITS:
+        # per-label stats
+        o_stats = summarize_counts_and_fracs(orig_splits[s])
+        n_stats = summarize_counts_and_fracs(splits[s])
+        lines.extend(render_comp_table(s, o_stats, n_stats))
+
+        # collapsed (NONE vs M+ vs OTHER)
+        o_coll = summarize_collapsed_counts_and_fracs(orig_splits[s])
+        n_coll = summarize_collapsed_counts_and_fracs(splits[s])
+        lines.extend(render_collapsed_comp(s, o_coll, n_coll))
+
     ok, _ = assert_group_integrity(splits)
     lines.append(f"AR group integrity: {'OK' if ok else 'VIOLATION'}")
     return "\n".join(lines)
@@ -265,7 +363,10 @@ def main():
     save_split(out_cv,    new_splits["cv"])
     save_split(out_test,  new_splits["test"])
 
-    summary = make_summary_text(args.seed, original_counts, targets, new_splits)
+    #summary = make_summary_text(args.seed, original_counts, targets, new_splits)
+    orig_splits = {"train": train_items, "cv": cv_items, "test": test_items}
+    summary = make_summary_text(args.seed, original_counts, targets, new_splits, orig_splits)
+
     summary_path = args.outdir / f"summary.seed_{args.seed}.txt"
     with summary_path.open("w", encoding="utf-8") as f:
         f.write(summary)
