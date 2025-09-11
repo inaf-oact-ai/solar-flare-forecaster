@@ -889,7 +889,6 @@ class CustomTrainer(Trainer):
 		if (getattr(self.args, "world_size", 1) or 1) > 1:
 			logger.info("DDP detected, using shard-aware sampler ...")
 			# IMPORTANT: class should implement set_epoch(epoch)
-			logger.info()
 			sampler = DistributedWeightedRandomSampler(
 				weights=sw,
 				# Let the sampler compute per-replica length internally or pass explicitly:
