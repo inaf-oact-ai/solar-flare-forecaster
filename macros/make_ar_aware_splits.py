@@ -249,39 +249,49 @@ def compute_targets(original_counts: Dict[str, int],
 def best_fit_partition(
     groups: Dict[str, List[dict]],
     targets: Dict[str, int],
-    seed: int
+    seed: int,
+    pack_order: str = "random",
 ) -> Dict[str, str]:
     """
-    Assign each AR (group) to a split, prioritizing filling under-target splits first.
-    Then use cost (deviation + mild overshoot penalty) to decide among candidates.
+    Assign each AR (group) to a split. Seed now *actually* affects the result
+    via ordering and tie-breaking.
     """
     rng = random.Random(seed)
     ar_sizes = {ar: len(items) for ar, items in groups.items()}
 
     ars = list(groups.keys())
-    rng.shuffle(ars)
-    ars.sort(key=lambda g: ar_sizes[g], reverse=True)  # big first helps packing
+    rng.shuffle(ars)  # seed controls the order
+
+    if pack_order == "size-desc":
+        # Keep size bias, but break ties randomly (seeded)
+        ars.sort(key=lambda g: (ar_sizes[g], rng.random()), reverse=True)
+        # NOTE: no resort after shuffle for 'random' order
 
     assigned: Dict[str, str] = {}
     current = {s: 0 for s in SPLITS}
 
+    # Slightly larger jitter so ties don’t always resolve the same way
     def cost(split: str, size: int) -> float:
         after = current[split] + size
         dev = abs(after - targets[split])
         overshoot = max(0, after - targets[split])
-        return dev + 0.25 * overshoot + rng.random() * 1e-6  # tiny jitter
+        return dev + 0.25 * overshoot + rng.random() * 1e-3
 
     for ar in ars:
         size = ar_sizes[ar]
-        # 1) Prefer splits still under target
+        # Prefer filling under-target splits
         under = [s for s in SPLITS if current[s] < targets[s]]
         candidates = under if under else list(SPLITS)
-        # 2) Pick cheapest among candidates
+
+        # Pick the cheapest; with jitter this becomes seed-sensitive
         chosen = min(candidates, key=lambda s: cost(s, size))
         assigned[ar] = chosen
         current[chosen] += size
 
     return assigned
+
+
+
 
 def rebalance_assignment(
     groups: Dict[str, List[dict]],
@@ -440,6 +450,8 @@ def main():
     ap.add_argument("--allow-missing-ar", action="store_true")
     ap.add_argument("--strict-ar-check", action="store_true",
                 help="If set, raise an error when any AR appears in multiple splits.")
+    ap.add_argument("--pack-order", choices=["random", "size-desc"], default="random",
+                help="Order to consider ARs. 'random' uses seed; 'size-desc' sorts by size (ties randomized).")
     args = ap.parse_args()
 
     train_items = load_split(args.train)
@@ -469,7 +481,7 @@ def main():
     targets = compute_targets(original_counts, override)
 
     # Initial assignment + rebalance
-    assignment0 = best_fit_partition(groups, targets, seed=args.seed)
+    assignment0 = best_fit_partition(groups, targets, seed=args.seed, pack_order=args.pack_order))
     assignment  = rebalance_assignment(groups, assignment0, targets)
 
     new_splits = build_splits_from_assignment(groups, assignment)
