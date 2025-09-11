@@ -23,6 +23,7 @@ import re
 from pathlib import Path
 import shutil
 import stat
+from contextlib import suppress
 
 ## COMMAND-LINE ARG MODULES
 import getopt
