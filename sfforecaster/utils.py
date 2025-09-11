@@ -150,6 +150,18 @@ def safe_link_or_copy(src: Path, dst: Path):
 			elif tmp.exists():
 				shutil.rmtree(tmp)
 
+def wait_for_file(path: Path, timeout_s=120, poll_s=0.25) -> bool:
+	t0 = time.time()
+	while time.time() - t0 < timeout_s:
+		if path.exists():
+			return True
+		time.sleep(poll_s)
+	return False
+	
+def touch(path: Path):
+	path.parent.mkdir(parents=True, exist_ok=True)
+	path.write_text("ok", encoding="utf-8")  # writing content can be more visible on some NFS setups
+
 ##########################
 ##    DATA IO UTILS
 ##########################

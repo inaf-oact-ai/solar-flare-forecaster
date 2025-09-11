@@ -1017,19 +1017,22 @@ def run_train(
 	train_result = trainer.train()
 	
 	# - Ensure all ranks finished training & any internal saves
-	barrier_if_distributed()
+	is_main = bool(trainer.args.should_save)
+	final_done = out_dir / ".final_done"
+	best_done  = out_dir / ".best_done"
+	#barrier_if_distributed()
 	
 	# - Save final model explicitly (if save_strategy is set to no)
-	if trainer.args.should_save and trainer.args.save_strategy == "no":
+	if is_main and trainer.args.save_strategy == "no":
 		logger.info("Saving trained model ...")	
 		trainer.save_model() # HF guards internally; only rank 0 writes	
 		#trainer.save_model(trainer.args.output_dir)
 		
 	# - Wait so other ranks don't race reading/checking directories
-	barrier_if_distributed()
+	#barrier_if_distributed()
 	
 	# - Only the main process should create/update links
-	if trainer.args.should_save:
+	if is_main:
 		out_dir = Path(trainer.args.output_dir)
 
 		# - Link/copy "final" to the last checkpoint (if any), else to current model dir
@@ -1040,6 +1043,7 @@ def run_train(
 			safe_link_or_copy(out_dir, out_dir / "final")
 		else:
 			safe_link_or_copy(last_ckpt, out_dir / "final")
+		touch(final_done)
 
 		# - Best checkpoint link (only if validation happened and path exists)
 		best_ckpt_path = getattr(trainer.state, "best_model_checkpoint", None)
@@ -1053,13 +1057,19 @@ def run_train(
 			best_ckpt = Path(best_ckpt_path)
 			if best_ckpt.exists():
 				safe_link_or_copy(best_ckpt, out_dir / "best")
+				touch(best_done)
 			else:
 				logger.warning(f"⚠️ Best checkpoint reported but not found on disk: {best_ckpt}")
+				
 		else:
 			logger.info("ℹ️ No validation detected or no best checkpoint available; skipping 'best' link.")
 		
 	# - Final barrier so all ranks see consistent fs state before program exit
-	barrier_if_distributed()
+	#barrier_if_distributed()
+	if not is_main:
+		ok = wait_for_file(final_done, timeout_s=180)
+		if not ok:
+			logger.warning("Final model file save sentinel not seen, proceeding without blocking ...")
 	
 	# - Save metrics
 	logger.info("Saving train metrics ...")        
