@@ -112,6 +112,122 @@ def render_collapsed_comp(split_name: str,
     return lines
 
 
+def _ar_key(it: dict) -> str:
+    """Return a stable AR key; if missing, synthesize one from id/filepath."""
+    ar = it.get("ar", None)
+    if ar is None:
+        return f"AR_MISSING::{it.get('id', it.get('filepath', 'unknown'))}"
+    return str(ar)
+
+def collect_ar_placements(splits: Dict[str, List[dict]]) -> Dict[str, List[str]]:
+    """
+    Build a mapping AR -> list of split names where that AR appears.
+    Example: {'1087': ['train'], '1210': ['cv', 'test'], ...}
+    """
+    placements = defaultdict(list)
+    for split_name, items in splits.items():
+        seen_in_split = set()
+        for it in items:
+            ak = _ar_key(it)
+            # avoid duplicating the same AR multiple times for the same split
+            if ak not in seen_in_split:
+                placements[ak].append(split_name)
+                seen_in_split.add(ak)
+    return dict(placements)
+
+
+def find_ar_exclusivity_violations(
+    splits: Dict[str, List[dict]]
+) -> Tuple[List[Tuple[str, List[str]]], int, int]:
+    """
+    Return (violations, n_unique_ars, n_total_items), where:
+      - violations: list of (ar_key, split_list) for ARs present in >1 split.
+    """
+    placements = collect_ar_placements(splits)
+    violations = [(ar, where) for ar, where in placements.items() if len(where) > 1]
+    n_unique = len(placements)
+    n_items = sum(len(v) for v in splits.values())
+    return violations, n_unique, n_items
+
+
+def render_ar_exclusivity_report(
+    tag: str,
+    splits: Dict[str, List[dict]],
+    max_list: int = 50
+) -> List[str]:
+    """
+    Render a report block for the summary file. Shows totals and (up to max_list) offending ARs.
+    """
+    lines = []
+    violations, n_unique, n_items = find_ar_exclusivity_violations(splits)
+    lines.append(f"=== AR exclusivity check: {tag} ===")
+    lines.append(f"  total items  : {n_items}")
+    lines.append(f"  unique ARs   : {n_unique}")
+    lines.append(f"  violations   : {len(violations)}  "
+                 f"(ARs appearing in multiple splits)")
+    if violations:
+        lines.append(f"  Offending ARs (showing up to {max_list}):")
+        # Sort: most splits first, then by AR id
+        violations_sorted = sorted(violations, key=lambda t: (-len(t[1]), t[0]))
+        for ar, where in violations_sorted[:max_list]:
+            lines.append(f"    - AR {ar}: in {', '.join(sorted(where))}")
+    lines.append("")
+    return lines
+
+
+
+
+def _unique_ars(items: List[dict]) -> set[str]:
+    return { _ar_key(it) for it in items }
+
+def _group_sizes(groups: Dict[str, List[dict]], ars: List[str]) -> int:
+    """Sum of image counts for given AR list."""
+    return sum(len(groups.get(ar, [])) for ar in ars)
+
+def render_ar_counts_and_movement(
+    split_name: str,
+    orig_items: List[dict],
+    new_items: List[dict],
+    groups: Dict[str, List[dict]],
+    topn: int = 20
+) -> List[str]:
+    lines: List[str] = []
+    orig_set = _unique_ars(orig_items)
+    new_set  = _unique_ars(new_items)
+
+    added = sorted(new_set - orig_set)
+    removed = sorted(orig_set - new_set)
+
+    images_in  = _group_sizes(groups, added)
+    images_out = _group_sizes(groups, removed)
+    delta_imgs = len(new_items) - len(orig_items)
+    check_ok   = (delta_imgs == (images_in - images_out))
+
+    lines.append(f"[{split_name}] Unique ARs: orig={len(orig_set)}  new={len(new_set)}  (ΔAR={len(new_set)-len(orig_set):+d})")
+    lines.append(f"    ARs moved IN : {len(added)}  (images={images_in})")
+    if added:
+        top_added = sorted(added, key=lambda ar: len(groups.get(ar, [])), reverse=True)[:topn]
+        lines.append( "      top moved IN:")
+        for ar in top_added:
+            lines.append(f"        - AR {ar}: {len(groups.get(ar, []))} images")
+
+    lines.append(f"    ARs moved OUT: {len(removed)}  (images={images_out})")
+    if removed:
+        top_removed = sorted(removed, key=lambda ar: len(groups.get(ar, [])), reverse=True)[:topn]
+        lines.append( "      top moved OUT:")
+        for ar in top_removed:
+            lines.append(f"        - AR {ar}: {len(groups.get(ar, []))} images")
+
+    if not check_ok:
+        lines.append(f"    ⚠︎ Sanity: Δimages={delta_imgs} but images_in-images_out={images_in-images_out}")
+
+    lines.append("")
+    return lines
+
+
+
+
+
 def group_by_ar(items: List[dict]) -> Dict[str, List[dict]]:
     groups = defaultdict(list)
     for it in items:
@@ -261,6 +377,7 @@ def make_summary_text(
     targets: Dict[str, int],
     splits: Dict[str, List[dict]],
     orig_splits: Dict[str, List[dict]],
+    groups: Dict[str, List[dict]],  
 ) -> str:
     lines = []
     lines.append(f"=== AR-aware Split Summary (seed={seed}) ===\n")
@@ -300,10 +417,16 @@ def make_summary_text(
         n_coll = summarize_collapsed_counts_and_fracs(splits[s])
         lines.extend(render_collapsed_comp(s, o_coll, n_coll))
 
+    # === NEW: AR counts & movement ===
+    lines.append("=== AR counts and movement (original → new) ===")
+    for s in SPLITS:
+        lines.extend(render_ar_counts_and_movement(s, orig_splits[s], splits[s], groups, topn=20))
+
     ok, _ = assert_group_integrity(splits)
     lines.append(f"AR group integrity: {'OK' if ok else 'VIOLATION'}")
+    
     return "\n".join(lines)
-
+    
 def main():
     ap = argparse.ArgumentParser(description="Create AR-aware train/cv/test splits matching original sizes.")
     ap.add_argument("--train", required=True, type=Path)
@@ -315,6 +438,8 @@ def main():
     ap.add_argument("--target-cv", type=int, default=None)
     ap.add_argument("--target-test", type=int, default=None)
     ap.add_argument("--allow-missing-ar", action="store_true")
+    ap.add_argument("--strict-ar-check", action="store_true",
+                help="If set, raise an error when any AR appears in multiple splits.")
     args = ap.parse_args()
 
     train_items = load_split(args.train)
@@ -365,7 +490,40 @@ def main():
 
     #summary = make_summary_text(args.seed, original_counts, targets, new_splits)
     orig_splits = {"train": train_items, "cv": cv_items, "test": test_items}
-    summary = make_summary_text(args.seed, original_counts, targets, new_splits, orig_splits)
+    
+    
+    # --- AR exclusivity checks ---
+    orig_violations, _, _ = find_ar_exclusivity_violations(orig_splits)
+    new_violations,  _, _ = find_ar_exclusivity_violations(new_splits)
+    
+    # --- Build the summary text (pass orig/new as you already do) ---
+    summary_lines = []
+
+    # Append your existing summary text first
+    summary_text = make_summary_text(args.seed, original_counts, targets, new_splits, orig_splits, groups)
+    summary_lines.append(summary_text)
+
+    # Append AR exclusivity reports (original and new)
+    summary_lines.extend(render_ar_exclusivity_report("ORIGINAL", orig_splits))
+    summary_lines.extend(render_ar_exclusivity_report("GENERATED", new_splits))
+
+    # Final combined summary
+    summary = "\n".join(summary_lines)
+
+    # If strict, stop the run on any violation
+    if args.strict_ar_check and (orig_violations or new_violations):
+        # Still write the summary so you can inspect it
+        summary_path = args.outdir / f"summary.seed_{args.seed}.txt"
+        summary_path.parent.mkdir(parents=True, exist_ok=True)
+        with summary_path.open("w", encoding="utf-8") as f:
+            f.write(summary)
+    
+        # Raise with a concise error; details are in the summary file
+        raise AssertionError(
+             f"AR exclusivity violation: "
+             f"{len(orig_violations)} in ORIGINAL, {len(new_violations)} in GENERATED. "
+             f"See {summary_path.name} for details."
+        )
 
     summary_path = args.outdir / f"summary.seed_{args.seed}.txt"
     with summary_path.open("w", encoding="utf-8") as f:
