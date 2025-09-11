@@ -481,7 +481,7 @@ def main():
     targets = compute_targets(original_counts, override)
 
     # Initial assignment + rebalance
-    assignment0 = best_fit_partition(groups, targets, seed=args.seed, pack_order=args.pack_order))
+    assignment0 = best_fit_partition(groups, targets, seed=args.seed, pack_order=args.pack_order)
     assignment  = rebalance_assignment(groups, assignment0, targets)
 
     new_splits = build_splits_from_assignment(groups, assignment)
