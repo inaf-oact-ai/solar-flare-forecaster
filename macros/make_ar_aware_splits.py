@@ -274,9 +274,16 @@ def main():
 
     # Write outputs
     args.outdir.mkdir(parents=True, exist_ok=True)
-    out_train = args.outdir / f"train.seed_{args.seed}.json"
-    out_cv = args.outdir / f"cv.seed_{args.seed}.json"
-    out_test = args.outdir / f"test.seed_{args.seed}.json"
+    #out_train = args.outdir / f"train.seed_{args.seed}.json"
+    #out_cv = args.outdir / f"cv.seed_{args.seed}.json"
+    #out_test = args.outdir / f"test.seed_{args.seed}.json"
+    filename_train= os.path.basefile(args.train) 
+    filename_cv= os.path.basefile(args.cv) 
+    filename_test= os.path.basefile(args.test) 
+    out_train = args.outdir / f"train/{filename_train}.json"
+    out_cv = args.outdir / f"cv/{filename_cv}.json"
+    out_test = args.outdir / f"test/{filename_test}.json"
+    
     save_split(out_train, new_splits["train"])
     save_split(out_cv, new_splits["cv"])
     save_split(out_test, new_splits["test"])
