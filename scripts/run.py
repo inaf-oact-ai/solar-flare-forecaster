@@ -157,6 +157,9 @@ def get_args():
 	parser.add_argument('--drop_last', dest='drop_last', action='store_true',help='Drop last incomplete batch (default=false)')	
 	parser.set_defaults(drop_last=False)
 	
+	parser.add_argument('--ddp_find_unused_parameters', dest='ddp_find_unused_parameters', action='store_true', help='Flag passed to DistributedDataParallel when using distributed training (default=false)')	
+	parser.set_defaults(ddp_find_unused_parameters=False)
+	
 	parser.add_argument('-metric_for_best_model', '--metric_for_best_model', dest='metric_for_best_model', required=False, type=str, default='tss', action='store', help='Metric used to select the best model (default=eval/tss)')
 	
 	parser.add_argument('-seed', '--seed', dest='seed', required=False, type=int, default=42, action='store',help='Random seed that will be set at the beginning of training (default=42)')
@@ -799,6 +802,7 @@ def load_training_opts(args):
 		dataloader_num_workers=args.num_workers,
 		dataloader_pin_memory=(args.pin_memory=="true"),
 		dataloader_persistent_workers=(args.persistent_workers=="true" and args.num_workers>0),
+		ddp_find_unused_parameters=args.ddp_find_unused_parameters,
 	)
 	
 	print("--> training options")
