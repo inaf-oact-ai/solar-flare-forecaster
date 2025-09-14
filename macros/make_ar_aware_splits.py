@@ -493,9 +493,9 @@ def main():
     filename_train= (args.train).name 
     filename_cv= (args.cv).name 
     filename_test= (args.test).name 
-    out_train = args.outdir / f"train/{filename_train}.json"
-    out_cv = args.outdir / f"cv/{filename_cv}.json"
-    out_test = args.outdir / f"test/{filename_test}.json"
+    out_train = args.outdir / f"train/{filename_train}"
+    out_cv = args.outdir / f"cv/{filename_cv}"
+    out_test = args.outdir / f"test/{filename_test}"
     save_split(out_train, new_splits["train"])
     save_split(out_cv,    new_splits["cv"])
     save_split(out_test,  new_splits["test"])
@@ -546,15 +546,5 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
-
-
-
-
-
-
-
-
 
     
