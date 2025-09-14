@@ -1021,12 +1021,56 @@ class TrainMetricsCallback(TrainerCallback):
 		# No change to control flow
 		return control
 
-class CudaClearCallback(TrainerCallback):
-	def on_evaluate(self, *args, **kwargs):
-		torch.cuda.empty_cache(); gc.collect()
-	def on_save(self, *args, **kwargs):
-		torch.cuda.empty_cache(); gc.collect()
-	def on_log(self, *args, **kwargs):
-		torch.cuda.empty_cache()
+class CudaGCCallback(TrainerCallback):
+	"""
+		Light-weight CUDA cache purger to reduce fragmentation.
+		Mirrors TrainMetricsCallback style: holds `trainer`, returns `control`.
+	"""
+	def __init__(self, trainer, verbose: bool = False, every_n_logs: int | None = None):
+		super().__init__()
+		self.trainer = trainer
+		self.verbose = verbose
+		self.every_n_logs = every_n_logs
 
+	def _purge(self, tag: str):
+		# Per-rank purge; safe under DDP (no barriers here!)
+		if torch.cuda.is_available():
+			try:
+				torch.cuda.synchronize()
+			except Exception:
+				pass
+			torch.cuda.empty_cache()
+
+		gc.collect()
+		if self.verbose and torch.cuda.is_available():
+			# quick per-device snapshot
+			for i in range(torch.cuda.device_count()):
+				a = torch.cuda.memory_allocated(i) / 1e9
+				r = torch.cuda.memory_reserved(i) / 1e9
+				print(f"[{tag}] GPU{i}: alloc={a:.2f}G reserved={r:.2f}G")
+
+	def on_epoch_begin(self, args, state, control, **kwargs):
+		# start each epoch with a clean cache
+		self._purge("epoch_begin")
+		return control
+
+	def on_evaluate(self, args, state, control, **kwargs):
+		# called after evaluation finishes
+		self._purge("after_evaluate")
+		return control
+
+	def on_save(self, args, state, control, **kwargs):
+		# called after a checkpoint is saved
+		self._purge("after_save")
+		return control
+
+	def on_epoch_end(self, args, state, control, **kwargs):
+		# after your TrainMetricsCallback computes/logs metrics, purge again
+		self._purge("epoch_end")
+		return control
+
+	def on_log(self, args, state, control, **kwargs):
+		if self.every_n_logs and state.global_step and state.global_step % self.every_n_logs == 0:
+			self._purge("on_log")
+		return control
 		

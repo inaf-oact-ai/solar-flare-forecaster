@@ -54,7 +54,7 @@ from sfforecaster.dataset import VideoDataset, ImgDataset, ImgStackDataset, TSDa
 from sfforecaster.custom_transforms import FlippingTransform, Rotate90Transform
 from sfforecaster.custom_transforms import VideoFlipping, VideoResize, VideoNormalize, VideoRotate90 
 from sfforecaster.metrics import build_multi_label_metrics, build_single_label_metrics, build_ordinal_metrics
-from sfforecaster.trainer import CustomTrainer, TrainMetricsCallback, CudaClearCallback
+from sfforecaster.trainer import CustomTrainer, TrainMetricsCallback, CudaGCCallback
 from sfforecaster.trainer import VideoDataCollator, ImgDataCollator, TSDataCollator
 from sfforecaster.model import CoralOrdinalHead
 from sfforecaster.inference import coral_logits_to_class_probs, coral_decode_with_thresholds
@@ -1378,7 +1378,7 @@ def main():
 		trainer.add_callback(TrainMetricsCallback(trainer))
 		
 	if args.clear_eval_cache:
-		trainer.add_callback(CudaClearCallback(trainer))
+		trainer.add_callback(CudaGCCallback(trainer))
 		
 	#######################################
 	##     RUN TEST
