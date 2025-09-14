@@ -159,6 +159,10 @@ def get_args():
 	
 	parser.add_argument('--ddp_find_unused_parameters', dest='ddp_find_unused_parameters', action='store_true', help='Flag passed to DistributedDataParallel when using distributed training (default=false)')	
 	parser.set_defaults(ddp_find_unused_parameters=False)
+	parser.add_argument('--fp16', dest='fp16', action='store_true', help='Enable fp16 (default=false)')	
+	parser.set_defaults(fp16=False)
+	parser.add_argument('--bf16', dest='bf16', action='store_true', help='Enable bf16 (default=false)')	
+	parser.set_defaults(bf16=False)
 	
 	parser.add_argument('-metric_for_best_model', '--metric_for_best_model', dest='metric_for_best_model', required=False, type=str, default='tss', action='store', help='Metric used to select the best model (default=eval/tss)')
 	
@@ -803,6 +807,8 @@ def load_training_opts(args):
 		dataloader_pin_memory=(args.pin_memory=="true"),
 		dataloader_persistent_workers=(args.persistent_workers=="true" and args.num_workers>0),
 		ddp_find_unused_parameters=args.ddp_find_unused_parameters,
+		fp16=args.fp16,
+		bf16=args.bf16,
 	)
 	
 	print("--> training options")
