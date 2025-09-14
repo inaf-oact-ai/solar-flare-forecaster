@@ -54,7 +54,7 @@ from sfforecaster.dataset import VideoDataset, ImgDataset, ImgStackDataset, TSDa
 from sfforecaster.custom_transforms import FlippingTransform, Rotate90Transform
 from sfforecaster.custom_transforms import VideoFlipping, VideoResize, VideoNormalize, VideoRotate90 
 from sfforecaster.metrics import build_multi_label_metrics, build_single_label_metrics, build_ordinal_metrics
-from sfforecaster.trainer import CustomTrainer, TrainMetricsCallback
+from sfforecaster.trainer import CustomTrainer, TrainMetricsCallback, CudaClearCallback
 from sfforecaster.trainer import VideoDataCollator, ImgDataCollator, TSDataCollator
 from sfforecaster.model import CoralOrdinalHead
 from sfforecaster.inference import coral_logits_to_class_probs, coral_decode_with_thresholds
@@ -190,6 +190,7 @@ def get_args():
 	parser.add_argument('-ordinal_thresholds', '--ordinal_thresholds', dest='ordinal_thresholds', required=False, type=list_of_floats, default=None, action='store', help='Sigmoid thresholds (e.g. [0.5,0.5,0.5]) for the K-1 flare classes. If None, 0.5 per class. (default=None)')
 		
 	parser.add_argument("--compute_train_metrics", dest='compute_train_metrics', action="store_true", default=False, help="Compute and log train metrics during training.")
+	parser.add_argument("--clear_eval_cache", dest='clear_eval_cache', action="store_true", default=False, help="Clear cache allocator for eval during training.")
 		
 	# - Run options
 	parser.add_argument('-device', '--device', dest='device', required=False, type=str, default="cuda:0", action='store', help='Device identifier')
@@ -1375,6 +1376,9 @@ def main():
 		
 	if args.compute_train_metrics:
 		trainer.add_callback(TrainMetricsCallback(trainer))
+		
+	if args.clear_eval_cache:
+		trainer.add_callback(CudaClearCallback(trainer))
 		
 	#######################################
 	##     RUN TEST

@@ -1020,4 +1020,13 @@ class TrainMetricsCallback(TrainerCallback):
 			self.trainer._compute_and_log_train_metrics()
 		# No change to control flow
 		return control
+
+class CudaClearCallback(TrainerCallback):
+	def on_evaluate(self, *args, **kwargs):
+		torch.cuda.empty_cache(); gc.collect()
+	def on_save(self, *args, **kwargs):
+		torch.cuda.empty_cache(); gc.collect()
+	def on_log(self, *args, **kwargs):
+		torch.cuda.empty_cache()
+
 		
