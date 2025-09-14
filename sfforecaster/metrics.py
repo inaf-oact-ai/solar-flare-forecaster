@@ -465,7 +465,7 @@ def build_multi_label_metrics(target_names):
 ###########################################
 ##   SINGLE-LABEL CLASS METRICS
 ###########################################
-def single_label_metrics(predictions, labels, target_names=None, chunk_size=64):
+def single_label_metrics(predictions, labels, target_names=None, chunk_size=64, compute_best_tss=False):
 	""" Helper function to compute single label metrics """
 	
 	# - First, apply sigmoid on predictions which are of shape (batch_size, num_labels)
@@ -683,20 +683,22 @@ def single_label_metrics(predictions, labels, target_names=None, chunk_size=64):
 	
 	# - For binary class compute best TSS vs threshold
 	if binary_class:
-		print("Computing best TSS vs threshold ...")
+	
+		if compute_best_tss:
+			print("Computing best TSS vs threshold ...")
 		
-		# - probs from logits already computed above
-		p_pos = probs[:, 1].numpy()          # assumes index 1 is positive (C+ or M+)
-		y_true_np = y_true
+			# - probs from logits already computed above
+			p_pos = probs[:, 1].numpy()          # assumes index 1 is positive (C+ or M+)
+			y_true_np = y_true
 
-		# - log and add to the returned metrics dict
-		best = best_tss_from_probs(p_pos, y_true_np)
-		metrics.update({
-			"tss_best": best["tss"],
-			"tss_best_thr": best["thr"],
-			"tss_best_tpr": best["tpr"],
-			"tss_best_tnr": best["tnr"],
-		})
+			# - log and add to the returned metrics dict
+			best = best_tss_from_probs(p_pos, y_true_np)
+			metrics.update({
+				"tss_best": best["tss"],
+				"tss_best_thr": best["thr"],
+				"tss_best_tpr": best["tpr"],
+				"tss_best_tnr": best["tnr"],
+			})
 		
 		# - Compute individual class metrics for the binary case
 		# class1 = "positive" (the second label in label_indices / confusion matrix)
