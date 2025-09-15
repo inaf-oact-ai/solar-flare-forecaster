@@ -731,20 +731,22 @@ def single_label_metrics(predictions, labels, target_names=None, chunk_size=64, 
 	  
 	return metrics
 
-def build_single_label_metrics(target_names, chunk_size):
+def build_single_label_metrics(target_names, chunk_size, compute_best_tss):
 
 	def compute_single_label_metrics(p: EvalPrediction):
 		""" Compute metrics """
 		preds = p.predictions[0] if isinstance(p.predictions, tuple) else p.predictions
 		nonlocal target_names
 		nonlocal chunk_size
+		nonlocal compute_best_tss
 		
 		# - Compute all metrics
 		metrics = single_label_metrics(
 			predictions=preds, 
 			labels=p.label_ids,
 			target_names=target_names,
-			chunk_size=chunk_size
+			chunk_size=chunk_size,
+			compute_best_tss=compute_best_tss
 		)
 		
 		# - Trainer wants only the scalar metrics
