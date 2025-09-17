@@ -834,6 +834,7 @@ class TSDataset(BaseDataset):
 		multilabel=False,
 		ordinal=False,
 		data_vars=["xrs_flux_ratio", "flare_hist"],
+		logstretch_vars=[False, False],
 	):
 		super().__init__(
 			filename=filename, 
@@ -859,8 +860,39 @@ class TSDataset(BaseDataset):
 		self.multilabel= multilabel
 		self.ordinal= ordinal
 		self.data_vars= data_vars
+		self.logstretch_vars= logstretch_vars
+		self.data_var_stats= {}
 		
-	def load_ts_var(self, idx, data_var):
+	def compute_ts_var_stats(self):
+		""" Compute ts var dataset stats """	
+		
+		for k, data_var in enumerate(self.data_vars):
+			data_all= []
+				
+			for idx in range(len(self.datalist)):
+				data= self.load_ts_var(idx, data_var, self.logstretch_vars[k])
+				if data is None:
+					logger.error(f"Failed to read ts data {idx} for var {data_var}, skipping ...")
+					continue
+				data_all.append(data)
+				
+			data_all= np.array(data_all)
+			data_min= np.min(data_all)
+			data_max= np.max(data_all)
+			data_mean= np.mean(data_all)
+			data_median= np.median(data_all)
+			data_std= np.std(data_all, ddof=1)
+			data_stats= {
+				"min": data_min,
+				"max": data_max,
+				"mean": data_mean,
+				"median": data_median,
+				"data_std": data_std
+			}
+			self.data_var_stats[data_var]= data_stats
+				
+		
+	def load_ts_var(self, idx, data_var, logstretch):
 		""" Load time series for a specific variable as numpy array """
 		
 		# - Get ts data variable
@@ -870,11 +902,24 @@ class TSDataset(BaseDataset):
 			data= np.asarray(item[data_var], dtype=np.float32).reshape(-1)
 		else:
 			logger.error(f"No data with name {data_var} present in input data!")
-			return None	
+			return None
 		
 		# - Replace NaNs with zeros
 		cond= ~np.isfinite(data)
 		data[cond]= 0.0
+		
+		if self.verbose:
+			print(f"Var {data_var} min/max: {data.min()}/{data.max()}")
+		
+		# - Log stretch?
+		if logstretch:
+			data_min= data.min()
+			data= np.log10(1.0 + data - data_min)
+			cond= ~np.isfinite(data)
+			data[cond]= 0.0
+		
+			if self.verbose:
+				print(f"Var {data_var} min/max (after logstretch): {data.min()}/{data.max()}")
 		
 		return data
 	
@@ -883,8 +928,8 @@ class TSDataset(BaseDataset):
 		
 		# - Loop over data vars and build feature channels
 		data_ch_list = []
-		for data_var in self.data_vars:
-			data_ch= self.load_ts_var(idx, data_var)
+		for i, data_var in enumerate(self.data_vars):
+			data_ch= self.load_ts_var(idx, data_var, self.logstretch_vars[i])
 			if data_ch is None:
 				logger.error(f"Failed to read ts data for var {data_var}, returning None!")
 				return None
