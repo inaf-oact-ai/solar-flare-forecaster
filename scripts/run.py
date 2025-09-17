@@ -680,6 +680,7 @@ def load_dataset(
 	elif args.data_modality=="ts":
 		#raise ValueError("IMPLEMENT DATA TRANSFORMS FOR TIME SERIES!")
 		logger.warning("No transforms are implemented for time-series data ...")
+		transform_train= None
 	else:
 		raise ValueError(f"Data modality {args.data_modality} not supported!")
 		
