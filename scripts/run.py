@@ -54,7 +54,7 @@ from sfforecaster.dataset import VideoDataset, ImgDataset, ImgStackDataset, TSDa
 from sfforecaster.custom_transforms import FlippingTransform, Rotate90Transform
 from sfforecaster.custom_transforms import VideoFlipping, VideoResize, VideoNormalize, VideoRotate90 
 from sfforecaster.metrics import build_multi_label_metrics, build_single_label_metrics, build_ordinal_metrics
-from sfforecaster.trainer import CustomTrainer, TrainMetricsCallback, CudaGCCallback
+from sfforecaster.trainer import CustomTrainer, CustomTrainerTS, TrainMetricsCallback, CudaGCCallback
 from sfforecaster.trainer import VideoDataCollator, ImgDataCollator, TSDataCollator, Uni2TSBatchCollator
 from sfforecaster.model import CoralOrdinalHead
 from sfforecaster.inference import coral_logits_to_class_probs, coral_decode_with_thresholds
@@ -1450,8 +1450,15 @@ def main():
 		print("model.config.label2id:", model.config.label2id)
 		
 	# - Set trainer
-	logger.info("Using custom trainer ...")
-	trainer = CustomTrainer(
+	#   NB: choose trainer class by modality
+	if args.data_modality == "ts":
+		logger.info("Using custom trainer for time-series data ...")
+		TrainerClass = CustomTrainerTS
+	else:
+		logger.info("Using custom trainer ...")
+		TrainerClass = CustomTrainer
+	
+	trainer = TrainerClass(
 		model=model,
 		args=training_opts,
 		train_dataset=dataset,

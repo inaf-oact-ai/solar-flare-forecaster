@@ -41,6 +41,7 @@ from transformers.trainer_callback import TrainerCallback
 from transformers import EvalPrediction    
 import evaluate
 
+
 # - SCLASSIFIER-VIT
 from sfforecaster.utils import *
 from sfforecaster import logger
@@ -1135,6 +1136,47 @@ class CustomTrainer(Trainer):
 		w_neg, w_pos = self.class_weights[0].to(self.model.device), self.class_weights[1].to(self.model.device)
 		return (w_pos / (w_neg + 1e-12))	
 		
+	
+class CustomTrainerTS(CustomTrainer):
+	"""
+		TS-only variant: override prediction_step so HF can collect preds/labels.
+		This leaves the base CustomTrainer behavior unchanged for image/video.
+	"""
+	def prediction_step(
+		self,
+		model: torch.nn.Module,
+		inputs: dict,
+		prediction_loss_only: bool,
+		ignore_keys: Optional[list] = None,
+	) -> Tuple[Optional[torch.Tensor], Optional[torch.Tensor], Optional[torch.Tensor]]:
+        
+		model.eval()
+
+		# Labels (required for metrics)
+		labels = inputs.get("labels", None)
+		has_labels = labels is not None
+
+		# Forward pass with Moirai’s packed fields
+		with torch.no_grad():
+			outputs = model(
+				target=inputs["target"],                  # [B,L,P]
+				observed_mask=inputs["observed_mask"],   # [B,L,P]
+				sample_id=inputs["sample_id"],           # [B,L]
+				time_id=inputs["time_id"],               # [B,L]
+				variate_id=inputs["variate_id"],         # [B,L]
+				prediction_mask=inputs["prediction_mask"]# [B,L]
+			)
+
+		# Your model returns SequenceClassifierOutput(logits=...)
+		logits = outputs.logits
+
+		# Return shape expected by HF: (loss, logits, labels). We don’t compute loss here
+    # because your CustomTrainer.compute_loss already owns loss logic.
+		loss = None
+		if prediction_loss_only:
+			return (loss, None, None)
+
+		return (loss, logits, labels)	
 		
 class TrainMetricsCallback(TrainerCallback):
 	"""
