@@ -479,14 +479,18 @@ def load_ts_model(
 	)
 	
 	# keep config in sync for your Trainer / metrics
-	if hasattr(model, "config"):
-		model.config.num_labels = num_out
-		model.config.id2label = id2label
-		model.config.label2id = label2id
-		
+	cfg = model.config
+	if hasattr(cfg, "update"):
+		cfg.update({"num_labels": num_out, "id2label": id2label, "label2id": label2id})
+	else:
+		cfg.num_labels = num_out
+		cfg.id2label  = id2label
+		cfg.label2id  = label2id
+	
 	print("--> model.config")
 	print(model.config)
 	print(model.config.to_json_string())
+	
 	
 	# - If binary, replace the final layer with 1-logit head
 	#if args.binary:
