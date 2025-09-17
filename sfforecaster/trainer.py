@@ -915,12 +915,15 @@ class CustomTrainer(Trainer):
 		
 		# - Retrieve features & labels
 		if "target" in inputs and "sample_id" in inputs:     # Uni2TS packed batch
-			print("debug inputs")
+			print("--> debug inputs")
 			dbg(inputs)	 # debug printout
 			outputs = model(**inputs)
 		else:
 			features = inputs.get("pixel_values") or inputs.get("input")
 			outputs = model(features)  # legacy path
+			
+			if torch.isnan(features).any() or torch.isinf(features).any():
+				print("⚠️ NaN values detected in batch features tensor!")
     
 		labels = inputs.get("labels")
 		logits = outputs.logits
@@ -933,9 +936,6 @@ class CustomTrainer(Trainer):
 		#labels = inputs.get("labels")
 		#logits = outputs.logits
 		
-		if torch.isnan(features).any() or torch.isinf(features).any():
-			print("⚠️ NaN values detected in batch features tensor!")
-			
 		if torch.isnan(labels).any() or torch.isinf(labels).any():
 			print("⚠️ NaN values detected in batch label tensor!")
 				
