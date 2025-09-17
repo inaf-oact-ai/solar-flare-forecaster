@@ -262,41 +262,40 @@ class Uni2TSBatchCollator:
 		raw_batch = []
 		labels = []
 		
-		for f in features:
-			# f["input"] shape: [T, C] (float32)
-			x = f["input"]
-			if isinstance(x, torch.Tensor):
-				x = x.detach().cpu().numpy()
-			x = np.asarray(x, dtype=np.float32)  # [T,C]
-			assert x.ndim == 2, f"expected [T,C], got {x.shape}"
+		for it in features:
+			x, y = _split_feature(it)
+			if x is None:
+				continue
 			T, C = x.shape
+			obs = np.ones((T, C), dtype=np.bool_)
+			raw_batch.append({"target": x, "observed_mask": obs})
+			labels.append(y)
 
-			obs = np.ones((T, C), dtype=bool)  # all observed; adjust if you have gaps
+		if not raw_batch:  # edge case: all invalid/None
+			return {
+				"target": torch.empty(0), "observed_mask": torch.empty(0, dtype=torch.bool),
+				"sample_id": torch.empty(0, dtype=torch.long), "time_id": torch.empty(0, dtype=torch.long),
+				"variate_id": torch.empty(0, dtype=torch.long), "prediction_mask": torch.empty(0, dtype=torch.bool),
+				"labels": torch.empty(0, dtype=torch.long)
+			}
 
-			raw_batch.append({
-				"target": x,            # [T,C] float32
-				"observed_mask": obs,   # [T,C] bool
-			})
-			labels.append(int(f["labels"]))
+		packed = self._collate(raw_batch)  # numpy arrays
+		packed["labels"] = np.asarray(labels, dtype=np.int64)
 
-		# Collate/pack → adds sample_id, time_id, variate_id, prediction_mask, and patchifies target
-		packed = self._collate(raw_batch)
-	        
-		# Keep labels separately (classification head pools per-sample via sample_id)
-		packed["labels"] = torch.tensor(labels, dtype=torch.long)
-
-		# Convert numpy arrays in 'packed' to tensors
-		for k, v in list(packed.items()):
+		# numpy → torch (preserve dtypes)
+		out: Dict[str, torch.Tensor] = {}
+		for k, v in packed.items():
 			if isinstance(v, np.ndarray):
-				# booleans stay bool, others become float32/int64 as appropriate
 				if v.dtype == np.bool_:
-					packed[k] = torch.from_numpy(v.astype(np.bool_))
+					out[k] = torch.from_numpy(v.astype(np.bool_))
 				elif np.issubdtype(v.dtype, np.integer):
-					packed[k] = torch.from_numpy(v.astype(np.int64))
+					out[k] = torch.from_numpy(v.astype(np.int64))
 				else:
-					packed[k] = torch.from_numpy(v.astype(np.float32))
-
-		return packed	
+					out[k] = torch.from_numpy(v.astype(np.float32))
+			else:
+				out[k] = v  # already tensor
+		
+		return out
 	
 ##########################################
 ##    FOCAL LOSS
@@ -856,17 +855,22 @@ class CustomTrainer(Trainer):
 		""" Override trainer compute_loss function """
 		
 		# - Retrieve features & labels
-		#pixel_values = inputs.get("pixel_values")
-		features = inputs.get("pixel_values", None)
-		if features is None:
-			features = inputs.get("input", None)  # <-- time series
-        
-		labels = inputs.get("labels")
-		#outputs = model(pixel_values)
-		outputs = model(features)
-		###labels = inputs.pop("labels")
-		###outputs = model(**inputs)
-		logits = outputs.logits
+		if "target" in inputs and "sample_id" in inputs:     # Uni2TS packed batch
+			outputs = model(**inputs)
+		else:
+			features = inputs.get("pixel_values") or inputs.get("input")
+			outputs = model(features)  # legacy path
+    
+    labels = inputs.get("labels")
+    logits = outputs.logits
+    
+		#features = inputs.get("pixel_values", None)
+		#if features is None:
+		#	features = inputs.get("input", None)  # <-- time series
+    
+    #outputs = model(features)    
+		#labels = inputs.get("labels")
+		#logits = outputs.logits
 		
 		if torch.isnan(features).any() or torch.isinf(features).any():
 			print("⚠️ NaN values detected in batch features tensor!")
@@ -875,8 +879,7 @@ class CustomTrainer(Trainer):
 			print("⚠️ NaN values detected in batch label tensor!")
 				
 		if torch.isnan(logits).any() or torch.isinf(logits).any():
-			print("⚠️ NaN values detected in logits tensor!")
-			
+			print("⚠️ NaN values detected in logits tensor!")	
 		
 		# ---- shape fix for single-logit binary + BCE/focal ----
 		if self.is_binary_single_logit and self.loss_type in ("ce", "focal"):
