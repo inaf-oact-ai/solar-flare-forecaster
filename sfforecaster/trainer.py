@@ -317,7 +317,7 @@ class Uni2TSBatchCollator:
 		else:
 			packed["time_id"] = _to_np(packed["time_id"], np.int64)
     
-    print("packed['time_id'].shape")
+		print("packed['time_id'].shape")
 		print(packed["time_id"].shape)
 		
 		# variate_id: zeros [B, L] (you can encode channel IDs later)
