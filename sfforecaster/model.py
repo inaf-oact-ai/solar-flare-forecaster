@@ -170,7 +170,8 @@ class MoiraiTSConfig(PretrainedConfig):
 		super().__init__(num_labels=num_labels, **kwargs)
 		self.num_labels = num_labels
 		self.d_model = d_model 
-        
+   
+
 class MoiraiForSequenceClassification(torch.nn.Module):
 	"""
 		Loss-agnostic wrapper: returns logits only.
