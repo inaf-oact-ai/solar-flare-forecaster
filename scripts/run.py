@@ -678,7 +678,8 @@ def load_dataset(
 	elif args.data_modality=="video":
 		transform_train, transform_valtest= load_video_transform(args, image_processor)
 	elif args.data_modality=="ts":
-		raise ValueError("IMPLEMENT DATA TRANSFORMS FOR TIME SERIES!")
+		#raise ValueError("IMPLEMENT DATA TRANSFORMS FOR TIME SERIES!")
+		logger.warning("No transforms are implemented for time-series data ...")
 	else:
 		raise ValueError(f"Data modality {args.data_modality} not supported!")
 		
