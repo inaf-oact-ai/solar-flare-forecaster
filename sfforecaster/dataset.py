@@ -835,6 +835,7 @@ class TSDataset(BaseDataset):
 		ordinal=False,
 		data_vars=["xrs_flux_ratio", "flare_hist"],
 		logstretch_vars=[False, False],
+		npoints=1440
 	):
 		super().__init__(
 			filename=filename, 
@@ -862,6 +863,7 @@ class TSDataset(BaseDataset):
 		self.data_vars= data_vars
 		self.logstretch_vars= logstretch_vars
 		self.data_var_stats= {}
+		self.npoints= npoints
 		#self.eps= 1.e-8
 		
 	def compute_ts_var_stats(self):
@@ -875,6 +877,10 @@ class TSDataset(BaseDataset):
 				if data is None:
 					logger.error(f"Failed to read ts data {idx} for var {data_var}, skipping ...")
 					continue
+				n= data.size
+				if n!=self.npoints:
+					logger.warning(f"Sample {idx} for var {data_var} has {n}!={self.npoints} points, skipping it ...")
+					continue	
 				data_npoints.append(data.size)
 				data_all.append(data)
 				

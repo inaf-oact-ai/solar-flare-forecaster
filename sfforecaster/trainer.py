@@ -251,8 +251,9 @@ class Uni2TSBatchCollator:
 		# max_length ≈ context_length (will be patched/packed inside)
 		self._collate = Collate(
 			target_field="target",
+			seq_fields=("target", "observed_mask"),
 			max_length=context_length,
-			patch_size=patch_size,
+			#patch_size=patch_size,
 			# other defaults are fine for classification (no forecast region)
 		)
 

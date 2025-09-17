@@ -107,6 +107,7 @@ def get_args():
 	
 	parser.add_argument('-ts_logstretchs', '--ts_logstretchs', dest='ts_logstretchs', required=False, type=str, default='0,0', action='store', help='Log stretch TS vars separated by commas (1=enable, 0=disable). Must have same dimension of ts_vars.')	
 	parser.add_argument('-ts_vars', '--ts_vars', dest='ts_vars', required=False, type=str, default='xrs_flux_ratio,flare_hist', action='store', help='Resize size in pixels used if --resize option is enabled (default=224)')
+	parser.add_argument('-ts_npoints', '--ts_npoints', dest='ts_npoints', required=False, type=int, default=1440, action='store',help='Number of points in ts features (default=1440)')
 	
 	# - Model options
 	parser.add_argument('-model', '--model', dest='model', required=False, type=str, default="google/siglip-so400m-patch14-384", action='store', help='Model pretrained file name or weight path to be loaded {google/siglip-large-patch16-256, google/siglip-base-patch16-256, google/siglip-base-patch16-256-i18n, google/siglip-so400m-patch14-384, google/siglip-base-patch16-224, MCG-NJU/videomae-base, MCG-NJU/videomae-large, OpenGVLab/VideoMAEv2-Large}')
@@ -740,7 +741,8 @@ def load_dataset(
 			multilabel=args.multilabel,
 			ordinal=args.ordinal,
 			data_vars=ts_vars,
-			logstretch_vars=ts_logstretchs
+			logstretch_vars=ts_logstretchs,
+			npoints=ts_npoints
 		)
 		
 	nsamples= dataset.get_sample_size()
@@ -774,7 +776,8 @@ def load_dataset(
 				multilabel=args.multilabel,
 				ordinal=args.ordinal,
 				data_vars=ts_vars,
-				logstretch_vars=ts_logstretchs
+				logstretch_vars=ts_logstretchs,
+				npoints=ts_npoints
 			)
 		
 		nsamples_cv= dataset_cv.get_sample_size()
