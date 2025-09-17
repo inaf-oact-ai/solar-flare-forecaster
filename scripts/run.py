@@ -519,7 +519,7 @@ def load_model(
 		return load_video_model(args, id2label, label2id, num_labels, nclasses, inference_mode)
 		
 	elif args.data_modality=="ts":
-		logger.info("Loading ts model & processor (name=%s) ..." % (args.ts_model_backbone))
+		logger.info("Loading ts model & processor (name=%s) ..." % (args.model_ts_backbone))
 		return load_ts_model(args, id2label, label2id, num_labels, nclasses, inference_mode)
 		
 	else:
