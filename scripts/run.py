@@ -467,10 +467,12 @@ def load_ts_model(
 ):
 	"""Load Moirai model for time-series classification (Trainer-compatible)."""
 
-	# - Create model (lazy head will be created on first forward)    
+	# - Create model (lazy head will be created on first forward)
+	num_out= (1 if args.binary else num_labels)
+	
 	model = MoiraiForSequenceClassification(
 		pretrained_name=args.model_ts_backbone,
-		num_labels=(1 if args.binary else num_labels),
+		num_labels=num_out,
 		freeze_backbone=args.freeze_backbone
 	)
 	
