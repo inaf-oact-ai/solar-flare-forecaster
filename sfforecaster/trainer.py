@@ -861,8 +861,8 @@ class CustomTrainer(Trainer):
 			features = inputs.get("pixel_values") or inputs.get("input")
 			outputs = model(features)  # legacy path
     
-    labels = inputs.get("labels")
-    logits = outputs.logits
+		labels = inputs.get("labels")
+		logits = outputs.logits
     
 		#features = inputs.get("pixel_values", None)
 		#if features is None:
