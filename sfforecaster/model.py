@@ -354,13 +354,36 @@ class MoiraiForSequenceClassification(torch.nn.Module):
 		print("batch")
 		print(batch)
 		
+		# synthesize missing ids/masks if needed
+		sid = batch.get("sample_id", None)
+		tgt = batch.get("target", None)
+		if sid is None or tgt is None:
+			raise ValueError("Expected packed Uni2TS fields: at least target and sample_id.")
+
+		# flatten sample_id to [N_tokens]
+		sample_id = sid.reshape(-1)
+		N_tokens = sample_id.numel()
+
+		if "time_id" not in batch:
+			time_id = torch.zeros_like(sample_id)
+			for s in torch.unique(sample_id):
+				idx = (sample_id == s).nonzero(as_tuple=False).squeeze(-1)
+				time_id[idx] = torch.arange(idx.numel(), device=sample_id.device, dtype=sample_id.dtype)
+			batch["time_id"] = time_id
+
+		if "variate_id" not in batch:
+			batch["variate_id"] = torch.zeros_like(sample_id)
+
+		if "prediction_mask" not in batch:
+			batch["prediction_mask"] = torch.zeros(N_tokens, dtype=torch.bool, device=sample_id.device)
+		
 		out = self.backbone(
 			batch["target"],          # patchified/packed by Collate
 			batch["observed_mask"],
 			batch["sample_id"],
-			#batch["time_id"],
-			#batch["variate_id"],
-			#batch["prediction_mask"],
+			batch["time_id"],
+			batch["variate_id"],
+			batch["prediction_mask"],
 			True,                     # training_mode
 		)
 		

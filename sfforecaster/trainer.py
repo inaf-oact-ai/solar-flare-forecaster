@@ -283,6 +283,30 @@ class Uni2TSBatchCollator:
 		packed = self._collate(raw_batch)  # numpy arrays
 		packed["labels"] = np.asarray(labels, dtype=np.int64)
 
+		# Ensure required IDs/masks exist; synthesize if missing.
+		# sample_id is required and should exist already.
+		if "sample_id" not in packed:
+			raise RuntimeError("PackCollate didn't return sample_id; cannot pool per sample.")
+
+		N_tokens = packed["target"].shape[0] if packed["target"].ndim == 2 else packed["target"].shape[0]  # [N_tokens, patch]
+		sample_id = packed["sample_id"].reshape(-1)  # [N_tokens]
+
+		# time_id: 0..(count-1) within each sample_id
+		if "time_id" not in packed:
+			time_id = np.zeros_like(sample_id)
+			for sid in np.unique(sample_id):
+				idx = np.where(sample_id == sid)[0]
+				time_id[idx] = np.arange(len(idx), dtype=sample_id.dtype)
+			packed["time_id"] = time_id
+
+		# variate_id: all zeros (you can encode channel index here if you have it)
+		if "variate_id" not in packed:
+			packed["variate_id"] = np.zeros_like(sample_id)
+
+		# prediction_mask: all False (classification doesn’t forecast)
+		if "prediction_mask" not in packed:
+			packed["prediction_mask"] = np.zeros_like(sample_id, dtype=bool)
+
 		# numpy → torch (preserve dtypes)
 		out: Dict[str, torch.Tensor] = {}
 		for k, v in packed.items():
