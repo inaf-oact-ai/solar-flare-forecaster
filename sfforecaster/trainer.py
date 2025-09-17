@@ -285,36 +285,43 @@ class Uni2TSBatchCollator:
 
 		# Ensure required IDs/masks exist; synthesize if missing.
 		# sample_id is required and should exist already.
-		sample_id = packed.get("sample_id", None)
-		if sample_id is None:
-			raise RuntimeError("PackCollate didn't return 'sample_id'; cannot pool per sample.")
+	
+		# 1) Normalize/flatten sample_id to 1-D
+		if "sample_id" not in packed:
+			raise RuntimeError("PackCollate did not return 'sample_id'.")
+		sample_id_np = as_numpy_int64(packed["sample_id"]).ravel()   # [N_tokens]
 
-		if isinstance(sample_id, torch.Tensor):
-			sample_id_np = sample_id.detach().cpu().numpy().astype(np.int64)
+		# 2) Ensure/flatten observed_mask (keep original for backbone); no change needed here
+		# target should already be [N_tokens, patch_dim]
+		N_tokens = sample_id_np.size
+
+		# 3) time_id: 0..(len-1) within each sample (1-D)
+		if "time_id" in packed:
+			time_id_np = _as_numpy_int64(packed["time_id"]).ravel()
 		else:
-			sample_id_np = np.asarray(sample_id).astype(np.int64)
-
-		N_tokens = sample_id_np.shape[0]
-
-		#N_tokens = packed["target"].shape[0] if packed["target"].ndim == 2 else packed["target"].shape[0]  # [N_tokens, patch]
-		#sample_id = packed["sample_id"].reshape(-1)  # [N_tokens]
-		
-		# time_id: 0..(len-1) within each sample
-		if "time_id" not in packed:
-			time_id = np.empty_like(sample_id_np, dtype=np.int64)
-			# vectorized-ish fill
+			time_id_np = np.empty(N_tokens, dtype=np.int64)
+			# compute per-sample ranks
 			for sid in np.unique(sample_id_np):
-				idx = np.nonzero(sample_id_np == sid)[0]
-				time_id[idx] = np.arange(idx.size, dtype=np.int64)
-			packed["time_id"] = time_id
-    
-		# variate_id: zeros (you can encode channel id later if needed)
-		if "variate_id" not in packed:
-			packed["variate_id"] = np.zeros(N_tokens, dtype=np.int64)
+				idx = np.nonzero(sample_id_np == sid)[0]           # 1-D indices into rows
+				time_id_np[idx] = np.arange(idx.size, dtype=np.int64)
+		
+		# 4) variate_id: zeros (1-D). You can encode channel ids later if desired.
+		if "variate_id" in packed:
+			variate_id_np = _as_numpy_int64(packed["variate_id"]).ravel()
+		else:
+			variate_id_np = np.zeros(N_tokens, dtype=np.int64)
 
-		# prediction_mask: all False for classification
-		if "prediction_mask" not in packed:
-			packed["prediction_mask"] = np.zeros(N_tokens, dtype=np.bool_)
+		# 5) prediction_mask: all False for classification (1-D)
+		if "prediction_mask" in packed:
+			prediction_mask_np = _as_numpy_bool(packed["prediction_mask"]).ravel()
+		else:
+			prediction_mask_np = np.zeros(N_tokens, dtype=np.bool_)
+
+		# 6) Overwrite packed with the 1-D versions the backbone expects
+		packed["sample_id"]       = sample_id_np
+		packed["time_id"]         = time_id_np
+		packed["variate_id"]      = variate_id_np
+		packed["prediction_mask"] = prediction_mask_np
 
 		# numpy → torch (preserve dtypes)
 		out: Dict[str, torch.Tensor] = {}
