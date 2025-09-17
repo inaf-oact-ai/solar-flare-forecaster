@@ -816,6 +816,8 @@ class CustomTrainer(Trainer):
 			getattr(self.model.config, "num_labels", None) == 1
 		)
 		
+		print("self.model.config")
+		print(self.model.config)
 		print("self.is_binary_single_logit")
 		print(self.is_binary_single_logit)
 		print(getattr(self.model.config, "num_labels", None))
