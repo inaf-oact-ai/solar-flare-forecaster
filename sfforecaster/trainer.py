@@ -787,7 +787,7 @@ class CustomTrainer(Trainer):
 		ordinal_pos_weights=None,
 		compute_train_metrics=False,
 		binary_pos_weights=None, 
-		#binary_sample_weights=None,
+		logitout_size=4,
 		verbose=False,
 		**kwargs
 	):
@@ -807,13 +807,14 @@ class CustomTrainer(Trainer):
 		self.verbose= verbose
 		self.compute_train_metrics = compute_train_metrics
 		self.binary_pos_weights= binary_pos_weights
-		#self.binary_sample_weights= binary_sample_weights
+		self.logitout_size= logitout_size
 		self._reset_train_buffers()
 		
 		self.is_binary_single_logit = (
 			not self.multilabel and
 			not self.ordinal and
-			getattr(self.model.config, "num_labels", None) == 1
+			self.logitout_size==1
+			#getattr(self.model.config, "num_labels", None) == 1
 		)
 		
 		print("self.model.config")
@@ -821,6 +822,7 @@ class CustomTrainer(Trainer):
 		print("self.is_binary_single_logit")
 		print(self.is_binary_single_logit)
 		print(getattr(self.model.config, "num_labels", None))
+		print(self.logitout_size)
 
 		# - Build the loss criterion
 		if self.multilabel:

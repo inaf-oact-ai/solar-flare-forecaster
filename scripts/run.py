@@ -1466,6 +1466,7 @@ def main():
 		ordinal_pos_weights=ordinal_pos_weights,
 		compute_train_metrics=args.compute_train_metrics,
 		binary_pos_weights=class_weights_binary,
+		logitout_size=(1 if args.binary else num_labels),
 		verbose=args.verbose
 	)
 		
