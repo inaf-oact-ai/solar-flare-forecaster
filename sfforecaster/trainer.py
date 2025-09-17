@@ -815,6 +815,10 @@ class CustomTrainer(Trainer):
 			not self.ordinal and
 			getattr(self.model.config, "num_labels", None) == 1
 		)
+		
+		print("self.is_binary_single_logit")
+		print(self.is_binary_single_logit)
+		print(getattr(self.model.config, "num_labels", None))
 
 		# - Build the loss criterion
 		if self.multilabel:
