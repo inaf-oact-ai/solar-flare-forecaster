@@ -862,6 +862,7 @@ class TSDataset(BaseDataset):
 		self.data_vars= data_vars
 		self.logstretch_vars= logstretch_vars
 		self.data_var_stats= {}
+		self.eps= 1.e-8
 		
 	def compute_ts_var_stats(self):
 		""" Compute ts var dataset stats """	
@@ -876,10 +877,7 @@ class TSDataset(BaseDataset):
 					continue
 				data_all.append(data)
 				
-			data_all= np.concatenate(data_all)
-			print("data_all.shape")
-			print(data_all.shape)
-				
+			data_all= np.concatenate(data_all)	
 			data_min= np.min(data_all)
 			data_max= np.max(data_all)
 			data_mean= np.mean(data_all)
@@ -917,7 +915,8 @@ class TSDataset(BaseDataset):
 		# - Log stretch?
 		if logstretch:
 			data_min= data.min()
-			data= np.log10(1.0 + data - data_min)
+			data= np.where(data==data_min, 0.0, np.log10(1.0 + data - data_min))
+			#data= np.log10(1.0 + data - data_min)
 			cond= ~np.isfinite(data)
 			data[cond]= 0.0
 		
