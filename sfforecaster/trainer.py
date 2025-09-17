@@ -322,19 +322,22 @@ class Uni2TSBatchCollator:
 		packed["time_id"]         = time_id_np
 		packed["variate_id"]      = variate_id_np
 		packed["prediction_mask"] = prediction_mask_np
-
-		# numpy → torch (preserve dtypes)
-		out: Dict[str, torch.Tensor] = {}
+				
+		# 7) Finally convert everything numpy→torch with correct dtypes
+		out = {}
 		for k, v in packed.items():
 			if isinstance(v, np.ndarray):
 				if v.dtype == np.bool_:
-					out[k] = torch.from_numpy(v.astype(np.bool_))
+					out[k] = torch.from_numpy(v)                        # bool
 				elif np.issubdtype(v.dtype, np.integer):
-					out[k] = torch.from_numpy(v.astype(np.int64))
+					out[k] = torch.from_numpy(v.astype(np.int64))       # int64
 				else:
-					out[k] = torch.from_numpy(v.astype(np.float32))
+					out[k] = torch.from_numpy(v.astype(np.float32))     # float32
+			elif isinstance(v, torch.Tensor):
+				out[k] = v
 			else:
-				out[k] = v  # already tensor
+				# labels etc. if still python scalars/lists
+				out[k] = torch.tensor(v)
 		
 		return out
 	
