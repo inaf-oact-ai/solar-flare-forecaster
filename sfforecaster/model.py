@@ -262,86 +262,7 @@ class MoiraiForSequenceClassification(torch.nn.Module):
 			return out
 		raise RuntimeError("Could not retrieve backbone representations (reprs).")
 		
-	def _backbone_forward(self, batch_dict: dict) -> torch.Tensor:
-		"""
-			batch_dict contains: target, observed_mask, sample_id, time_id, variate_id, prediction_mask (+ others).
-			Returns token-level representations [N_tokens, d] or [B, L, d]. We normalize to [N_tokens, d].
-		"""
-		self._last_repr = None
-		out = self.backbone(
-			batch_dict["target"],           # tokenized / patchified by Collate
-			batch_dict["observed_mask"],
-			batch_dict["sample_id"],
-			batch_dict["time_id"],
-			batch_dict["variate_id"],
-			batch_dict["prediction_mask"],
-			True,                           # training_mode
-		)
-
-		# Prefer the hook
-		if isinstance(self._last_repr, torch.Tensor):
-			reprs = self._last_repr
-		elif isinstance(out, dict):
-			reprs = out.get("reprs") or out.get("hidden_states") or out.get("x")
-		elif isinstance(out, (list, tuple)) and out and isinstance(out[0], torch.Tensor):
-			reprs = out[0]
-		else:
-			raise RuntimeError("Could not retrieve representations from Moirai backbone output.")
-
-		# Normalize to [N_tokens, d]
-		if reprs.dim() == 3:
-			B, L, D = reprs.shape
-			reprs = reprs.reshape(B*L, D)
-		
-		return reprs
-		
-	def _pool_by_sample(self, reprs: torch.Tensor, sample_id: torch.Tensor) -> torch.Tensor:
-		"""
-			Group tokens by sample_id → mean pool → [B, d].
-			sample_id: [N_tokens] or [B,L] identifying which original sample each token belongs to.
-		"""
-		# Flatten sample_id to [N_tokens]
-		if sample_id.dim() > 1:
-			sample_id = sample_id.reshape(-1)
-        
-		B = int(sample_id.max().item()) + 1
-		d = reprs.size(-1)
-		pooled = torch.zeros(B, d, device=reprs.device, dtype=reprs.dtype)
-		counts = torch.zeros(B, device=reprs.device, dtype=torch.long)
-		# Simple scatter-mean without extra deps
-		for sid in range(B):
-			mask = (sample_id == sid)
-			if mask.any():
-				pooled[sid] = reprs[mask].mean(dim=0)
-				counts[sid] = mask.sum()
-
-		return pooled  # [B,d]
-
-	def _backbone_forward_old(self, x: torch.Tensor) -> torch.Tensor:
-		self._last_repr = None
-		
-		# Try raw [B,T,C]
-		try:
-			out = self.backbone(x)
-		except Exception:
-			# Try channel-first [B,C,T]
-			try:
-				out = self.backbone(x.permute(0,2,1))
-			except Exception:
-				# Try Uni2TS dict kwarg
-				out = self.backbone(past_target=x.transpose(1,2))
-
-		if isinstance(self._last_repr, torch.Tensor):
-			return self._last_repr
-		if isinstance(out, dict):
-			for k in ("reprs","hidden_states","x"):
-				if k in out and isinstance(out[k], torch.Tensor):
-					return out[k]
-		if isinstance(out, (list,tuple)) and len(out)>0 and isinstance(out[0], torch.Tensor):
-			return out[0]
-
-		raise RuntimeError("Could not obtain representations from Moirai backbone.")
-
+	
 	@property
 	def device(self):
 		try:
@@ -350,33 +271,6 @@ class MoiraiForSequenceClassification(torch.nn.Module):
 			# In case no parameters exist yet
 			return torch.device("cpu")
 
-	def forward_old(
-		self,
-		input: Optional[torch.Tensor] = None,
-		pixel_values: Optional[torch.Tensor] = None,
-		**kwargs
-	) -> SequenceClassifierOutput:
-		
-		# Accept either key
-		x = input if input is not None else pixel_values
-		if x is None:
-			raise ValueError("Expected `input` (time-series) or `pixel_values`.")
-
-		reprs = self._backbone_forward_old(x)   # [B,L,d]
-		reprs = reprs.transpose(1, 2)       # [B,d,L]
-		pooled = self.pool(reprs).squeeze(-1)        # [B,d]
-		logits = self.head(pooled)                   # [B,K]
-		return SequenceClassifierOutput(logits=logits)
-		
-	#def forward(self, **batch) -> SequenceClassifierOutput:
-	#	"""
-	#		Expects the **packed** batch produced by Uni2TS collator:
-	#		target, observed_mask, sample_id, time_id, variate_id, prediction_mask, labels
-	#	"""
-	#	reprs = self._backbone_forward(batch)
-	#	pooled = self._pool_by_sample(reprs, batch["sample_id"])
-	#	logits = self.head(pooled)  # [B, num_labels]
-	#	return SequenceClassifierOutput(logits=logits)	
 		
 	def forward(self, **batch) -> SequenceClassifierOutput:
 		# Call Moirai with the packed fields your version requires:
@@ -384,15 +278,113 @@ class MoiraiForSequenceClassification(torch.nn.Module):
 		print("batch")
 		print(batch)
 		
+		x  = batch["target"]          # [B, L, C]
+    obs= batch["observed_mask"]   # [B, L, C] (or [B, L] in some builds)
+		
+		# 1) read backbone expectations
+		# infer the in_features the embed wants (384 for moirai-2.0-R-small)
+		patch_size = getattr(self.backbone, "patch_size", 32)
+		try:
+			in_features = self.backbone.in_proj.weight.shape[1]  # [out, in]
+		except Exception:
+			# fallback: commonly d_ff
+			in_features = getattr(self.backbone, "d_ff", patch_size * x.size(-1))
+		
+		
+		print("patch_size")
+		print(patch_size)
+		print("in_features")
+		print(in_features)
+		
+		# expected variates (channels)
+		Creq = max(1, in_features // patch_size)
+		print("Creq")
+		print(Creq)
+		
+		B, L, C = x.shape
+		device  = x.device
+		dtype   = x.dtype
+		
+		# 2) pad channels if you have fewer than expected
+		if C < Creq:
+			pad = torch.zeros(B, L, Creq - C, dtype=dtype, device=device)
+			x   = torch.cat([x, pad], dim=-1)                       # [B, L, Creq]
+			if obs.dim() == 3:
+				# padded channels are "unobserved"
+				obs_pad = torch.zeros(B, L, Creq - C, dtype=torch.bool, device=device)
+				obs     = torch.cat([obs, obs_pad], dim=-1)         # [B, L, Creq]
+		elif C > Creq:
+			# If you ever pass more than expected, truncate (or decide a mapping)
+			x   = x[..., :Creq]
+			if obs.dim() == 3:
+				obs = obs[..., :Creq]
+		
+		print("obs")
+		print(obs.shape)
+		
+		# 3) make sure observed_mask is 3-D so we can patchify it
+		if obs.dim() == 2:
+			obs = obs.unsqueeze(-1).expand(B, L, Creq)  # [B, L, Creq]
+		
+		print("obs")
+		print(obs.shape)
+		
+		# 4) truncate L to multiple of patch_size and patchify
+		Lp = (L // patch_size) * patch_size
+		if Lp == 0:
+			raise RuntimeError("Sequence too short for the chosen patch_size.")
+		if Lp != L:
+			x   = x[:, :Lp, :]
+			obs = obs[:, :Lp, :]
+		
+		print("Lp")
+		print(Lp)
+		
+		# patchify: [B, Lp, Creq] → [B, L', patch_size*Creq], with L' = Lp/ps
+		Ltok = Lp // patch_size
+		x    = x.view(B, Ltok, patch_size * Creq).contiguous()        # float
+		obs  = obs.view(B, Ltok, patch_size * Creq).contiguous()      # bool
+
+		# 5) rebuild the id/mask tensors so shapes match [B, Ltok]
+		time_id         = torch.arange(Ltok, device=device).view(1, -1).expand(B, Ltok)
+		sample_id       = torch.arange(B,    device=device).view(-1, 1).expand(B, Ltok)
+		variate_id      = torch.zeros(B, Ltok, dtype=torch.long, device=device)
+		prediction_mask = torch.zeros(B, Ltok, dtype=torch.bool, device=device)
+
+		# 6) store back into the batch dict
+		batch["target"]           = x
+		batch["observed_mask"]    = obs
+		batch["time_id"]          = time_id
+		batch["sample_id"]        = sample_id
+		batch["variate_id"]       = variate_id
+		batch["prediction_mask"]  = prediction_mask
+		
+		print("→ target:", tuple(batch["target"].shape))
+		print("→ obs   :", tuple(batch["observed_mask"].shape))
+		print("→ ids   :", tuple(batch["sample_id"].shape), tuple(batch["time_id"].shape))
+		print("→ pmask :", tuple(batch["prediction_mask"].shape))
+		print("→ expected in_features:", in_features, "patch_size:", patch_size, "Creq:", Creq)
+		
+		# ---- now call the backbone with aligned shapes ----
 		out = self.backbone(
-			batch["target"],          # [B, L, P]
-			batch["observed_mask"],   # [B, L, P]
-			batch["sample_id"],       # [B, L]
-			batch["time_id"],         # [B, L]
-			batch["variate_id"],      # [B, L]
-			batch["prediction_mask"], # [B, L]
+			batch["target"],          # [B, Ltok, patch_size*Creq] → last dim == in_features
+			batch["observed_mask"],   # [B, Ltok, patch_size*Creq] (bool)
+			batch["sample_id"],       # [B, Ltok]
+			batch["time_id"],         # [B, Ltok]
+			batch["variate_id"],      # [B, Ltok]
+			batch["prediction_mask"], # [B, Ltok]
 			True,
 		)
+		
+		#out = self.backbone(
+		#	batch["target"],          # [B, L, P]
+		#	batch["observed_mask"],   # [B, L, P]
+		#	batch["sample_id"],       # [B, L]
+		#	batch["time_id"],         # [B, L]
+		#	batch["variate_id"],      # [B, L]
+		#	batch["prediction_mask"], # [B, L]
+		#	True,
+		#)
 		
 		print("type(out)")
 		print(type(out))
