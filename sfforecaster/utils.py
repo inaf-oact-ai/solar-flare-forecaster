@@ -86,6 +86,35 @@ def barrier_if_distributed():
 	if dist.is_available() and dist.is_initialized():
 		dist.barrier()
 
+def resolve_state_dict_path(model_path: str) -> str | None:
+	"""
+		If model_path points to a fine-tuned checkpoint directory or file, return the .bin path.
+	"""
+	if not model_path:
+		return None
+
+	if os.path.isdir(model_path):
+		# Typical HF save
+		cand = os.path.join(model_path, "pytorch_model.bin")
+		if os.path.exists(cand):
+			return cand
+		
+		# Sometimes users keep a "final" symlink/folder — look inside
+		cand2 = os.path.join(model_path, "final", "pytorch_model.bin")
+		if os.path.exists(cand2):
+			return cand2
+        
+		# Accept direct .bin inside dir (pick first)
+		for f in os.listdir(model_path):
+			if f.endswith(".bin"):
+				return os.path.join(model_path, f)
+
+	# Direct file path
+	if os.path.isfile(model_path) and model_path.endswith(".bin"):
+		return model_path
+
+	return None
+
 ##########################
 ##     OS UTILS
 ##########################

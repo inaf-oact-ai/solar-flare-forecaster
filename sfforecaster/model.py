@@ -256,6 +256,14 @@ class MoiraiForSequenceClassification(torch.nn.Module):
 
 		raise RuntimeError("Could not obtain representations from Moirai backbone.")
 
+	@property
+	def device(self):
+		try:
+			return next(self.parameters()).device
+		except StopIteration:
+			# In case no parameters exist yet
+			return torch.device("cpu")
+
 	def forward(
 		self,
 		input: Optional[torch.Tensor] = None,

@@ -862,7 +862,7 @@ class TSDataset(BaseDataset):
 		self.data_vars= data_vars
 		self.logstretch_vars= logstretch_vars
 		self.data_var_stats= {}
-		self.eps= 1.e-8
+		#self.eps= 1.e-8
 		
 	def compute_ts_var_stats(self):
 		""" Compute ts var dataset stats """	
