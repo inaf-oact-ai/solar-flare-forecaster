@@ -167,9 +167,9 @@ class MoiraiTSConfig(PretrainedConfig):
 		d_model: int = 384, 
 		**kwargs
 	):
-		super().__init__(**kwargs)
+		super().__init__(num_labels=num_labels, **kwargs)
 		self.num_labels = num_labels
-		self.d_model = d_model
+		self.d_model = d_model 
         
 class MoiraiForSequenceClassification(torch.nn.Module):
 	"""
