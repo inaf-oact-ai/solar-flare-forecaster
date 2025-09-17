@@ -1273,7 +1273,9 @@ def main():
 		patch_size = getattr(model.backbone, "patch_size", 32)
 
 		# - Retrieve number of time series points
-		n_points= dataset.data_var_stats["npoints"]
+		ts_var_stats= dataset.data_var_stats
+		ts_vars= list(ts_var_stats.keys())
+		n_points= ts_var_stats[ts_vars[0]]["npoints"]
 		if len(n_points)>1:
 			logger.warning(f"Time series have more than one length: {str(n_points)} ...")
 		context_length= n_points[0]
