@@ -105,6 +105,9 @@ def get_args():
 	parser.set_defaults(resize=False)
 	parser.add_argument('-resize_size', '--resize_size', dest='resize_size', required=False, type=int, default=224, action='store', help='Resize size in pixels used if --resize option is enabled (default=224)')	
 	
+	parser.add_argument('-ts_logstretchs', '--ts_logstretchs', dest='ts_logstretchs', required=False, type=str, default='0,0', action='store', help='Log stretch TS vars separated by commas (1=enable, 0=disable). Must have same dimension of ts_vars.')	
+	parser.add_argument('-ts_vars', '--ts_vars', dest='ts_vars', required=False, type=str, default='xrs_flux_ratio,flare_hist', action='store', help='Resize size in pixels used if --resize option is enabled (default=224)')
+	
 	# - Model options
 	parser.add_argument('-model', '--model', dest='model', required=False, type=str, default="google/siglip-so400m-patch14-384", action='store', help='Model pretrained file name or weight path to be loaded {google/siglip-large-patch16-256, google/siglip-base-patch16-256, google/siglip-base-patch16-256-i18n, google/siglip-so400m-patch14-384, google/siglip-base-patch16-224, MCG-NJU/videomae-base, MCG-NJU/videomae-large, OpenGVLab/VideoMAEv2-Large}')
 	parser.add_argument('--vitloader', dest='vitloader', action='store_true', help='If enabled use ViTForImageClassification to load model otherwise AutoModelForImageClassification (default=false)')	
@@ -660,6 +663,12 @@ def load_dataset(
 	""" Load dataset """
 	
 	#====================================
+	#==   SET OPTIONS
+	#====================================
+	ts_vars= [str(x.strip()) for x in args.ts_vars.split(',')]
+	ts_logstretchs= [bool(x.strip()) for x in args.ts_logstretchs.split(',')]
+	
+	#====================================
 	#==   CREATE DATA TRANSFORMS
 	#====================================
 	# - Load data transforms
@@ -701,29 +710,11 @@ def load_dataset(
 	else:
 		logger.info("Create train dataset ...")
 	
-	dataset= DatasetClass(
-		filename=args.datalist,
-		transform=transform,
-		load_as_gray=args.grayscale,
-		apply_zscale=args.zscale, zscale_contrast=args.zscale_contrast,
-		resize=args.resize, resize_size=args.resize_size,
-		nclasses=nclasses,
-		id2target=id2target,
-		multiout=args.multiout,
-		multilabel=args.multilabel,
-		ordinal=args.ordinal,
-		verbose=args.verbose
-	)
-		
-	nsamples= dataset.get_sample_size()
-	
-	logger.info("#%d entries in dataset ..." % (nsamples))
-		
-	# - Create validation set?
-	if args.datalist_cv!="":
-		dataset_cv= DatasetClass(
-			filename=args.datalist_cv,
-			transform=transform_valtest,
+	if args.data_modality=="image" or args.data_modality=="video":
+		dataset= DatasetClass(
+			filename=args.datalist,
+			transform=transform,
+			verbose=args.verbose,
 			load_as_gray=args.grayscale,
 			apply_zscale=args.zscale, zscale_contrast=args.zscale_contrast,
 			resize=args.resize, resize_size=args.resize_size,
@@ -732,9 +723,56 @@ def load_dataset(
 			multiout=args.multiout,
 			multilabel=args.multilabel,
 			ordinal=args.ordinal,
-			verbose=args.verbose
 		)
+		
+	elif args.data_modality=="ts":
+		dataset= DatasetClass(
+			filename=args.datalist,
+			transform=transform,
+			verbose=args.verbose,
+			nclasses=nclasses,
+			id2target=id2target,
+			multiout=args.multiout,
+			multilabel=args.multilabel,
+			ordinal=args.ordinal,
+			data_vars=ts_data_vars,
+			logstretch_vars=ts_logstretchs
+		)
+		
+	nsamples= dataset.get_sample_size()
 	
+	logger.info("#%d entries in dataset ..." % (nsamples))
+		
+	# - Create validation set?
+	if args.datalist_cv!="":
+		if args.data_modality=="image" or args.data_modality=="video":
+			dataset_cv= DatasetClass(
+				filename=args.datalist_cv,
+				transform=transform_valtest,
+				verbose=args.verbose,
+				load_as_gray=args.grayscale,
+				apply_zscale=args.zscale, zscale_contrast=args.zscale_contrast,
+				resize=args.resize, resize_size=args.resize_size,
+				nclasses=nclasses,
+				id2target=id2target,
+				multiout=args.multiout,
+				multilabel=args.multilabel,
+				ordinal=args.ordinal,
+			)
+		elif args.data_modality=="ts":
+			dataset_cv= DatasetClass(
+				filename=args.datalist_cv,
+				transform=transform_valtest,
+				verbose=args.verbose,
+				nclasses=nclasses,
+				id2target=id2target,
+				multiout=args.multiout,
+				multilabel=args.multilabel,
+				ordinal=args.ordinal,
+				data_vars=ts_data_vars,
+				logstretch_vars=ts_logstretchs
+			)
+		
 		nsamples_cv= dataset_cv.get_sample_size()
 		logger.info("#%d entries in val dataset ..." % (nsamples_cv))
 	
