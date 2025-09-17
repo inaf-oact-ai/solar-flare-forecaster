@@ -742,9 +742,6 @@ def load_dataset(
 			data_vars=ts_vars,
 			logstretch_vars=ts_logstretchs
 		)
-		dataset.compute_ts_var_stats()
-		print("--> ts stats")
-		print(dataset.data_var_stats)
 		
 	nsamples= dataset.get_sample_size()
 	
@@ -779,9 +776,6 @@ def load_dataset(
 				data_vars=ts_vars,
 				logstretch_vars=ts_logstretchs
 			)
-			dataset_cv.compute_ts_var_stats()
-			print("--> ts stats (EVAL)")
-			print(dataset_cv.data_var_stats)
 		
 		nsamples_cv= dataset_cv.get_sample_size()
 		logger.info("#%d entries in val dataset ..." % (nsamples_cv))
@@ -1264,6 +1258,17 @@ def main():
 	
 	elif args.data_modality=="ts":
 		#data_collator= TSDataCollator()
+		
+		# - Compute ts var stats
+		dataset.compute_ts_var_stats()
+		print("--> ts stats")
+		print(dataset.data_var_stats)
+		
+		if dataset_cv is not None:
+			dataset_cv.compute_ts_var_stats()
+			print("--> ts stats (EVAL)")
+			print(dataset_cv.data_var_stats)
+		
 		# - Find patch_size from the backbone once (typical values 16/32/64). If unsure, 32 usually works for Moirai-2.0-R-small.
 		patch_size = getattr(model.backbone, "patch_size", 32)
 
