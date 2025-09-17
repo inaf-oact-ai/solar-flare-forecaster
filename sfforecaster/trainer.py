@@ -915,6 +915,7 @@ class CustomTrainer(Trainer):
 		
 		# - Retrieve features & labels
 		if "target" in inputs and "sample_id" in inputs:     # Uni2TS packed batch
+			print("debug inputs")
 			dbg(inputs)	 # debug printout
 			outputs = model(**inputs)
 		else:

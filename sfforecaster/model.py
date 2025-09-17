@@ -186,13 +186,31 @@ class MoiraiForSequenceClassification(torch.nn.Module):
 		super().__init__()
 		self.backbone = _M.from_pretrained(pretrained_name)
 		
-		d_model = getattr(self.backbone, "d_model", 384)
-		self.config = MoiraiTSConfig(num_labels=num_labels, d_model=d_model)
+		#d_model = getattr(self.backbone, "d_model", 384)
+		#self.config = MoiraiTSConfig(num_labels=num_labels, d_model=d_model)
 
-		if freeze_backbone:
-			for p in self.backbone.parameters():
-				p.requires_grad = False
+		#if freeze_backbone:
+		#	for p in self.backbone.parameters():
+		#		p.requires_grad = False
 
+		# - Try to make the backbone emit representations
+		#for attr in ("return_repr", "output_hidden_states", "return_hidden"):
+		#	if hasattr(self.backbone, attr):
+		#		try: setattr(self.backbone, attr, True)
+		#		except Exception: pass
+
+		#self._last_repr = None
+		#self._hooked = self._register_hook_on_any(["transformer","encoder","backbone","model","net"])
+
+		#self.pool = torch.nn.AdaptiveAvgPool1d(1)
+		#self.head = torch.nn.Sequential(
+		#	torch.nn.Linear(d_model, d_model),
+		#	torch.nn.ReLU(),
+		#	torch.nn.Dropout(0.1),
+		#	torch.nn.Linear(d_model, num_labels),
+		#)
+		
+		
 		# - Try to make the backbone emit representations
 		for attr in ("return_repr", "output_hidden_states", "return_hidden"):
 			if hasattr(self.backbone, attr):
@@ -202,13 +220,10 @@ class MoiraiForSequenceClassification(torch.nn.Module):
 		self._last_repr = None
 		self._hooked = self._register_hook_on_any(["transformer","encoder","backbone","model","net"])
 
-		self.pool = torch.nn.AdaptiveAvgPool1d(1)
-		self.head = torch.nn.Sequential(
-			torch.nn.Linear(d_model, d_model),
-			torch.nn.ReLU(),
-			torch.nn.Dropout(0.1),
-			torch.nn.Linear(d_model, num_labels),
-		)
+		# Lazy head: we don't assume the rep dim. We'll create it on the first forward.
+		self.classifier = None          # nn.Linear will be created lazily
+		self.num_labels = num_labels
+		
 
 	def _register_hook_on_any(self, names):
 		for name in names:
@@ -231,6 +246,21 @@ class MoiraiForSequenceClassification(torch.nn.Module):
 			except Exception:
 				continue
 		return False
+		
+	def _get_reprs(self, out):
+		# Prefer the hook-captured tensor
+		if isinstance(self._last_repr, torch.Tensor):
+			return self._last_repr
+		# Otherwise, probe common keys/tuple
+		if isinstance(out, dict):
+			for k in ("reprs", "hidden_states", "x", "last_hidden_state"):
+				if k in out and isinstance(out[k], torch.Tensor):
+					return out[k]
+		if isinstance(out, (list, tuple)) and out and isinstance(out[0], torch.Tensor):
+			return out[0]
+		if isinstance(out, torch.Tensor):
+			return out
+		raise RuntimeError("Could not retrieve backbone representations (reprs).")
 		
 	def _backbone_forward(self, batch_dict: dict) -> torch.Tensor:
 		"""
@@ -364,36 +394,48 @@ class MoiraiForSequenceClassification(torch.nn.Module):
 			True,
 		)
 		
-		# out may be a tuple/dict; prefer a tensor called 'reprs' / first tensor
-		if isinstance(out, dict):
-			reprs = out.get("reprs") or out.get("hidden_states") or out.get("x")
-		elif isinstance(out, (list, tuple)):
-			reprs = out[0]
-		else:
-			reprs = out
-		assert isinstance(reprs, torch.Tensor)
-
-		# reprs likely [B, L, d]
-		if reprs.dim() == 2:  # rare; reshape if needed
-			reprs = reprs.view(batch["sample_id"].shape[0], batch["sample_id"].shape[1], -1)
+		print("type(out)")
+		print(type(out))
+		
+		reprs = self._get_reprs(out)    # expect [B, L, D_repr] or [B*L, D_repr]
+        
+		# Normalize to [B, L, D_repr]
+		if reprs.dim() == 2:
+			# infer B,L from batch ids
+			B, L = batch["sample_id"].shape
+			D = reprs.size(-1)
+			reprs = reprs.view(B, L, D)
+		elif reprs.dim() == 3:
 			B, L, D = reprs.shape
-
-
-		# Build a 2-D valid timestep mask: observed at any patch and not in prediction window
-		obs = batch["observed_mask"]
-		if obs.dim() == 3:              # [B, L, P] → reduce over patch
-			valid_obs = obs.any(dim=-1) # [B, L]
 		else:
-			valid_obs = obs             # already [B, L]
-    
-		valid = valid_obs & (~batch["prediction_mask"])    # [B, L]
-		weights = valid.float()                             # 1.0 for valid, 0.0 otherwise
-		den = weights.sum(dim=1, keepdim=True).clamp_min(1.0)  # [B,1] avoid div/0
+ 			raise RuntimeError(f"Unexpected reprs shape: {tuple(reprs.shape)}")
 
-		# masked mean over timesteps
-		pooled = (reprs * weights.unsqueeze(-1)).sum(dim=1) / den  # [B, d]
+		print("reprs.dim()")
+		print(reprs.dim())
+		print(reprs.shape)
 
-		logits = self.head(pooled)  # [B, num_labels]
+		# Valid timestep mask: observed anywhere in patch and not in prediction window
+		obs = batch["observed_mask"]
+		valid_obs = obs.any(dim=-1) if obs.dim() == 3 else obs  # [B,L]
+		valid = valid_obs & (~batch["prediction_mask"])          # [B,L]
+		weights = valid.float()
+		den = weights.sum(dim=1, keepdim=True).clamp_min(1.0)    # [B,1]
 
-		return SequenceClassifierOutput(logits=logits)	
+		# Masked mean over time → [B, D_repr]
+		pooled = (reprs * weights.unsqueeze(-1)).sum(dim=1) / den
+
+		# Lazily build/resize the classifier if needed
+		if (self.classifier is None) or (self.classifier.in_features != pooled.size(-1)):
+			in_dim = pooled.size(-1)
+			# Simple, stable head; feel free to swap back to a 2-layer MLP if you prefer
+			self.classifier = torch.nn.Linear(in_dim, self.num_labels).to(pooled.device)
+
+		if not hasattr(self, "_dbg_done"):
+			print("[MoiraiTS] reprs:", tuple(reprs.shape))
+			print("[MoiraiTS] pooled:", tuple(pooled.shape))
+			print("[MoiraiTS] head in/out:", self.classifier.in_features, "->", self.classifier.out_features)
+			self._dbg_done = True
+
+		logits = self.classifier(pooled)  # [B, num_labels]
+		return SequenceClassifierOutput(logits=logits)
 		
