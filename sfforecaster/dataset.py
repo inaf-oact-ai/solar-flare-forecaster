@@ -871,12 +871,14 @@ class TSDataset(BaseDataset):
 				
 			for idx in range(len(self.datalist)):
 				data= self.load_ts_var(idx, data_var, self.logstretch_vars[k])
+				print("data.shape")
+				print(data.shape)
 				if data is None:
 					logger.error(f"Failed to read ts data {idx} for var {data_var}, skipping ...")
 					continue
 				data_all.append(data)
 				
-			data_all= np.array(data_all)
+			data_all= np.concatenate(data_all)
 			data_min= np.min(data_all)
 			data_max= np.max(data_all)
 			data_mean= np.mean(data_all)
