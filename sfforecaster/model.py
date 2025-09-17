@@ -412,6 +412,8 @@ class MoiraiForSequenceClassification(torch.nn.Module):
 		if (self.classifier is None) or (self.classifier.in_features != pooled.size(-1)):
 			in_dim = pooled.size(-1)
 			# Simple, stable head; feel free to swap back to a 2-layer MLP if you prefer
+			print("self.num_labels")
+			print(self.num_labels)
 			self.classifier = torch.nn.Linear(in_dim, self.num_labels).to(pooled.device)
 
 		if not hasattr(self, "_dbg_done"):
