@@ -185,6 +185,7 @@ class MoiraiForSequenceClassification(torch.nn.Module):
 	):
 		super().__init__()
 		self.backbone = _M.from_pretrained(pretrained_name)
+		
 		d_model = getattr(self.backbone, "d_model", 384)
 		self.config = MoiraiTSConfig(num_labels=num_labels, d_model=d_model)
 
@@ -230,8 +231,63 @@ class MoiraiForSequenceClassification(torch.nn.Module):
 			except Exception:
 				continue
 		return False
+		
+	def _backbone_forward(self, batch_dict: dict) -> torch.Tensor:
+		"""
+			batch_dict contains: target, observed_mask, sample_id, time_id, variate_id, prediction_mask (+ others).
+			Returns token-level representations [N_tokens, d] or [B, L, d]. We normalize to [N_tokens, d].
+		"""
+		self._last_repr = None
+		out = self.backbone(
+			batch_dict["target"],           # tokenized / patchified by Collate
+			batch_dict["observed_mask"],
+			batch_dict["sample_id"],
+			batch_dict["time_id"],
+			batch_dict["variate_id"],
+			batch_dict["prediction_mask"],
+			True,                           # training_mode
+		)
 
-	def _forward_backbone(self, x: torch.Tensor) -> torch.Tensor:
+		# Prefer the hook
+		if isinstance(self._last_repr, torch.Tensor):
+			reprs = self._last_repr
+		elif isinstance(out, dict):
+			reprs = out.get("reprs") or out.get("hidden_states") or out.get("x")
+		elif isinstance(out, (list, tuple)) and out and isinstance(out[0], torch.Tensor):
+			reprs = out[0]
+		else:
+			raise RuntimeError("Could not retrieve representations from Moirai backbone output.")
+
+		# Normalize to [N_tokens, d]
+		if reprs.dim() == 3:
+			B, L, D = reprs.shape
+			reprs = reprs.reshape(B*L, D)
+		
+		return reprs
+		
+	def _pool_by_sample(self, reprs: torch.Tensor, sample_id: torch.Tensor) -> torch.Tensor:
+		"""
+			Group tokens by sample_id → mean pool → [B, d].
+			sample_id: [N_tokens] or [B,L] identifying which original sample each token belongs to.
+		"""
+		# Flatten sample_id to [N_tokens]
+		if sample_id.dim() > 1:
+			sample_id = sample_id.reshape(-1)
+        
+		B = int(sample_id.max().item()) + 1
+		d = reprs.size(-1)
+		pooled = torch.zeros(B, d, device=reprs.device, dtype=reprs.dtype)
+		counts = torch.zeros(B, device=reprs.device, dtype=torch.long)
+		# Simple scatter-mean without extra deps
+		for sid in range(B):
+			mask = (sample_id == sid)
+			if mask.any():
+				pooled[sid] = reprs[mask].mean(dim=0)
+				counts[sid] = mask.sum()
+
+		return pooled  # [B,d]
+
+	def _backbone_forward_old(self, x: torch.Tensor) -> torch.Tensor:
 		self._last_repr = None
 		
 		# Try raw [B,T,C]
@@ -264,7 +320,7 @@ class MoiraiForSequenceClassification(torch.nn.Module):
 			# In case no parameters exist yet
 			return torch.device("cpu")
 
-	def forward(
+	def forward_old(
 		self,
 		input: Optional[torch.Tensor] = None,
 		pixel_values: Optional[torch.Tensor] = None,
@@ -276,9 +332,19 @@ class MoiraiForSequenceClassification(torch.nn.Module):
 		if x is None:
 			raise ValueError("Expected `input` (time-series) or `pixel_values`.")
 
-		reprs = self._forward_backbone(x)   # [B,L,d]
+		reprs = self._backbone_forward_old(x)   # [B,L,d]
 		reprs = reprs.transpose(1, 2)       # [B,d,L]
 		pooled = self.pool(reprs).squeeze(-1)        # [B,d]
 		logits = self.head(pooled)                   # [B,K]
 		return SequenceClassifierOutput(logits=logits)
+		
+	def forward(self, **batch) -> SequenceClassifierOutput:
+		"""
+			Expects the **packed** batch produced by Uni2TS collator:
+			target, observed_mask, sample_id, time_id, variate_id, prediction_mask, labels
+		"""
+		reprs = self._backbone_forward(batch)
+		pooled = self._pool_by_sample(reprs, batch["sample_id"])
+		logits = self.head(pooled)  # [B, num_labels]
+		return SequenceClassifierOutput(logits=logits)		
 		

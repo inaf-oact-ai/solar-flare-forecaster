@@ -55,7 +55,7 @@ from sfforecaster.custom_transforms import FlippingTransform, Rotate90Transform
 from sfforecaster.custom_transforms import VideoFlipping, VideoResize, VideoNormalize, VideoRotate90 
 from sfforecaster.metrics import build_multi_label_metrics, build_single_label_metrics, build_ordinal_metrics
 from sfforecaster.trainer import CustomTrainer, TrainMetricsCallback, CudaGCCallback
-from sfforecaster.trainer import VideoDataCollator, ImgDataCollator, TSDataCollator
+from sfforecaster.trainer import VideoDataCollator, ImgDataCollator, TSDataCollator, Uni2TSBatchCollator
 from sfforecaster.model import CoralOrdinalHead
 from sfforecaster.inference import coral_logits_to_class_probs, coral_decode_with_thresholds
 from sfforecaster.inference import load_img_for_inference, load_video_for_inference, load_ts_for_inference
@@ -1263,7 +1263,21 @@ def main():
 		)
 	
 	elif args.data_modality=="ts":
-		data_collator= TSDataCollator()
+		#data_collator= TSDataCollator()
+		# - Find patch_size from the backbone once (typical values 16/32/64). If unsure, 32 usually works for Moirai-2.0-R-small.
+		patch_size = getattr(model.backbone, "patch_size", 32)
+
+		# - Retrieve number of time series points
+		n_points= dataset.data_var_stats["npoints"]
+		if len(n_points)>1:
+			logger.warning(f"Time series have more than one length: {str(n_points)} ...")
+		context_length= n_points[0]
+
+		data_collator = Uni2TSBatchCollator(
+			context_length=context_length,     # 24h window
+			patch_size=patch_size,
+		)
+	
 	
 	else:
 		raise ValueError(f"Data modality {args.data_modality} not supported!")

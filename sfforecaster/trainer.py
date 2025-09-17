@@ -45,6 +45,12 @@ import evaluate
 from sfforecaster.utils import *
 from sfforecaster import logger
 
+# - MOIRAI
+try:
+	from uni2ts.data.loader import Collate
+except Exception:
+	logger.warning("Cannot import uni2ts collate method (not an error if using images/videos) ...")
+
 
 ##########################################
 ##    DATA COLLATORS
@@ -234,6 +240,43 @@ class TSDataCollator:
 		
 		return {"input": features, "labels": labels}	
 		
+	
+class Uni2TSBatchCollator:
+	"""
+		Wraps Uni2TS Collate to produce the tokenized batch for Moirai{1,2}.forward(...)
+		from simple samples: {"input": [T,C], "labels": int}.
+	"""
+	def __init__(self, context_length: int, patch_size: int):
+		# Collate args: target_field name must match what backbone expects ("target")
+		# max_length ≈ context_length (will be patched/packed inside)
+		self._collate = Collate(
+			target_field="target",
+			max_length=context_length,
+			patch_size=patch_size,
+			# other defaults are fine for classification (no forecast region)
+		)
+
+	def __call__(self, features: List[Dict[str, Any]]) -> Dict[str, torch.Tensor]:
+		# Prepare "raw" samples in Uni2TS expected pre-collate form
+		raw_batch = []
+		labels = []
+		for f in features:
+			x = torch.tensor(f["input"], dtype=torch.float32)  # [T,C]
+			T, C = x.shape
+			raw_batch.append({
+				"target": x,                                   # [T,C]
+				"observed_mask": torch.ones(T, C, dtype=torch.bool),
+				# No explicit prediction window for classification
+			})
+			labels.append(int(f["labels"]))
+
+		# Collate/pack → adds sample_id, time_id, variate_id, prediction_mask, and patchifies target
+		packed = self._collate(raw_batch)
+
+		# Keep labels separately (classification head pools per-sample via sample_id)
+		packed["labels"] = torch.tensor(labels, dtype=torch.long)
+
+		return packed	
 	
 ##########################################
 ##    FOCAL LOSS
