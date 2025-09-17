@@ -871,25 +871,26 @@ class TSDataset(BaseDataset):
 				
 			for idx in range(len(self.datalist)):
 				data= self.load_ts_var(idx, data_var, self.logstretch_vars[k])
-				print("data.shape")
-				print(data.shape)
 				if data is None:
 					logger.error(f"Failed to read ts data {idx} for var {data_var}, skipping ...")
 					continue
 				data_all.append(data)
 				
 			data_all= np.concatenate(data_all)
+			print("data_all.shape")
+			print(data_all.shape)
+				
 			data_min= np.min(data_all)
 			data_max= np.max(data_all)
 			data_mean= np.mean(data_all)
 			data_median= np.median(data_all)
 			data_std= np.std(data_all, ddof=1)
 			data_stats= {
-				"min": data_min,
-				"max": data_max,
-				"mean": data_mean,
-				"median": data_median,
-				"data_std": data_std
+				"min": float(data_min),
+				"max": float(data_max),
+				"mean": float(data_mean),
+				"median": float(data_median),
+				"data_std": float(data_std)
 			}
 			self.data_var_stats[data_var]= data_stats
 				
