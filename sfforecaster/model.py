@@ -279,7 +279,7 @@ class MoiraiForSequenceClassification(torch.nn.Module):
 		print(batch)
 		
 		x  = batch["target"]          # [B, L, C]
-    obs= batch["observed_mask"]   # [B, L, C] (or [B, L] in some builds)
+		obs= batch["observed_mask"]   # [B, L, C] (or [B, L] in some builds)
 		
 		# 1) read backbone expectations
 		# infer the in_features the embed wants (384 for moirai-2.0-R-small)
