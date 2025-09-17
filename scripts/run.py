@@ -742,7 +742,7 @@ def load_dataset(
 			ordinal=args.ordinal,
 			data_vars=ts_vars,
 			logstretch_vars=ts_logstretchs,
-			npoints=ts_npoints
+			npoints=args.ts_npoints
 		)
 		
 	nsamples= dataset.get_sample_size()
@@ -777,7 +777,7 @@ def load_dataset(
 				ordinal=args.ordinal,
 				data_vars=ts_vars,
 				logstretch_vars=ts_logstretchs,
-				npoints=ts_npoints
+				npoints=args.ts_npoints
 			)
 		
 		nsamples_cv= dataset_cv.get_sample_size()
