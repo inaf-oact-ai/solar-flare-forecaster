@@ -1450,7 +1450,6 @@ def main():
 		eval_dataset=dataset_cv,
 		compute_metrics=compute_metrics_custom,
 		processing_class=image_processor,
-		#data_collator=collate_fn,
 		data_collator=data_collator,
 		class_weights=class_weights,
 		multilabel=bool(args.multilabel),

@@ -817,12 +817,12 @@ class CustomTrainer(Trainer):
 			#getattr(self.model.config, "num_labels", None) == 1
 		)
 		
-		print("self.model.config")
-		print(self.model.config)
-		print("self.is_binary_single_logit")
-		print(self.is_binary_single_logit)
-		print(getattr(self.model.config, "num_labels", None))
-		print(self.logitout_size)
+		#print("self.model.config")
+		#print(self.model.config)
+		#print("self.is_binary_single_logit")
+		#print(self.is_binary_single_logit)
+		#print(getattr(self.model.config, "num_labels", None))
+		#print(self.logitout_size)
 
 		# - Build the loss criterion
 		if self.multilabel:
@@ -923,8 +923,8 @@ class CustomTrainer(Trainer):
 		
 		# - Retrieve features & labels
 		if "target" in inputs and "sample_id" in inputs:     # Uni2TS packed batch
-			print("--> debug inputs")
-			dbg(inputs)	 # debug printout
+			#print("--> debug inputs")
+			#dbg(inputs)	 # debug printout
 			outputs = model(**inputs)
 		else:
 			features = inputs.get("pixel_values") or inputs.get("input")

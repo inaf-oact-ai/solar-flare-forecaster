@@ -189,31 +189,13 @@ class MoiraiForSequenceClassification(torch.nn.Module):
 		
 		d_model = getattr(self.backbone, "d_model", 384)
 		self.config = MoiraiTSConfig(num_labels=num_labels, d_model=d_model)
-		print("self.config.num_labels")
-		print(self.config.num_labels)
+		#print("self.config.num_labels")
+		#print(self.config.num_labels)
 
-		#if freeze_backbone:
-		#	for p in self.backbone.parameters():
-		#		p.requires_grad = False
+		if freeze_backbone:
+			for p in self.backbone.parameters():
+				p.requires_grad = False
 
-		# - Try to make the backbone emit representations
-		#for attr in ("return_repr", "output_hidden_states", "return_hidden"):
-		#	if hasattr(self.backbone, attr):
-		#		try: setattr(self.backbone, attr, True)
-		#		except Exception: pass
-
-		#self._last_repr = None
-		#self._hooked = self._register_hook_on_any(["transformer","encoder","backbone","model","net"])
-
-		#self.pool = torch.nn.AdaptiveAvgPool1d(1)
-		#self.head = torch.nn.Sequential(
-		#	torch.nn.Linear(d_model, d_model),
-		#	torch.nn.ReLU(),
-		#	torch.nn.Dropout(0.1),
-		#	torch.nn.Linear(d_model, num_labels),
-		#)
-		
-		
 		# - Try to make the backbone emit representations
 		for attr in ("return_repr", "output_hidden_states", "return_hidden"):
 			if hasattr(self.backbone, attr):
@@ -278,8 +260,8 @@ class MoiraiForSequenceClassification(torch.nn.Module):
 	def forward(self, **batch) -> SequenceClassifierOutput:
 		# Call Moirai with the packed fields your version requires:
 		
-		print("batch")
-		print(batch)
+		#print("batch")
+		#print(batch)
 		
 		x  = batch["target"]          # [B, L, C]
 		obs= batch["observed_mask"]   # [B, L, C] (or [B, L] in some builds)
@@ -292,12 +274,12 @@ class MoiraiForSequenceClassification(torch.nn.Module):
 		# PyTorch Linear weight is [out_features, in_features]
 		Wexp = in_proj.hidden_layer.in_features    # ← this is 384 in your env
     
-		print("patch_size")
-		print(patch_size)
-		print("in_proj")
-		print(in_proj)
-		print("Wexp")
-		print(Wexp)
+		#print("patch_size")
+		#print(patch_size)
+		#print("in_proj")
+		#print(in_proj)
+		#print("Wexp")
+		#print(Wexp)
 		
 		# 2) ts_embed concatenates (values + mask) → factor = 2
 		concat_factor = 2
@@ -319,8 +301,8 @@ class MoiraiForSequenceClassification(torch.nn.Module):
 			x   = x[..., :Creq]
 			obs = obs[..., :Creq]
 
-		print("obs")
-		print(obs.shape)
+		#print("obs")
+		#print(obs.shape)
 		
 		# 5) truncate L to multiple of patch_size and patchify
 		Lp = (L // patch_size) * patch_size
@@ -334,8 +316,8 @@ class MoiraiForSequenceClassification(torch.nn.Module):
 		x    = x.view(B, Ltok, patch_size * Creq).contiguous()       # [B, L', P*Creq]
 		obs  = obs.view(B, Ltok, patch_size * Creq).contiguous()     # [B, L', P*Creq] (bool)
 
-		print("Lp")
-		print(Lp)
+		#print("Lp")
+		#print(Lp)
 		
 		# 6) rebuild ids/masks to match L'
 		time_id         = torch.arange(Ltok, device=device).view(1, -1).expand(B, Ltok)
@@ -381,8 +363,8 @@ class MoiraiForSequenceClassification(torch.nn.Module):
 		#	True,
 		#)
 		
-		print("type(out)")
-		print(type(out))
+		#print("type(out)")
+		#print(type(out))
 		
 		reprs = self._get_reprs(out)    # expect [B, L, D_repr] or [B*L, D_repr]
         
@@ -397,9 +379,9 @@ class MoiraiForSequenceClassification(torch.nn.Module):
 		else:
  			raise RuntimeError(f"Unexpected reprs shape: {tuple(reprs.shape)}")
 
-		print("reprs.dim()")
-		print(reprs.dim())
-		print(reprs.shape)
+		#print("reprs.dim()")
+		#print(reprs.dim())
+		#print(reprs.shape)
 
 		# Valid timestep mask: observed anywhere in patch and not in prediction window
 		obs = batch["observed_mask"]
@@ -415,8 +397,8 @@ class MoiraiForSequenceClassification(torch.nn.Module):
 		if (self.classifier is None) or (self.classifier.in_features != pooled.size(-1)):
 			in_dim = pooled.size(-1)
 			# Simple, stable head; feel free to swap back to a 2-layer MLP if you prefer
-			print("self.num_labels")
-			print(self.num_labels)
+			#print("self.num_labels")
+			#print(self.num_labels)
 			self.classifier = torch.nn.Linear(in_dim, self.num_labels).to(pooled.device)
 
 		if not hasattr(self, "_dbg_done"):
