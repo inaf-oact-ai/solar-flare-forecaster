@@ -36,7 +36,6 @@ from transformers import AutoImageProcessor, AutoModelForImageClassification
 from transformers import ViTImageProcessor, ViTForImageClassification, ViTConfig
 from transformers import VideoMAEImageProcessor, VideoMAEForPreTraining
 from transformers import VideoMAEForVideoClassification
-from transformers import MoiraiForSequenceClassification
 from transformers.configuration_utils import PretrainedConfig
 from transformers.modeling_utils import PreTrainedModel
 from transformers.data.data_collator import DataCollator
@@ -48,7 +47,7 @@ from transformers import EvalPrediction
 #import evaluate
 
 # - SFFORECASTER
-from sfforecaster.model import MultiHorizonVideoMAE
+from sfforecaster.model import MultiHorizonVideoMAE, MoiraiForSequenceClassification
 from sfforecaster.utils import *
 from sfforecaster.dataset import get_target_maps
 from sfforecaster.dataset import VideoDataset, ImgDataset, ImgStackDataset, TSDataset
