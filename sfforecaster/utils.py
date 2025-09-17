@@ -114,6 +114,31 @@ def resolve_state_dict_path(model_path: str) -> str | None:
 		return model_path
 
 	return None
+	
+def to_numpy_2d(x: ArrayLike) -> np.ndarray:
+	"""Convert input to float32 numpy array of shape [T, C]. Accepts [T,C] or [T] (→ [T,1])."""
+	if isinstance(x, torch.Tensor):
+		x = x.detach().cpu().numpy()
+	x = np.asarray(x)
+	if x.ndim == 1:
+		x = x[:, None]
+	assert x.ndim == 2, f"expected 2D [T,C], got {x.shape}"
+	return x.astype(np.float32)
+	
+def split_feature(item: Union[Dict[str, Any], Tuple[Any, Any], List[Any]]):
+	"""Return (x_np[T,C], y_int) from either dict {'input','labels'} or tuple/list (x, y)."""
+	if isinstance(item, dict):
+		x = item.get("input", item.get("pixel_values", item.get("features")))
+		y = item.get("labels", item.get("label"))
+	else:  # tuple/list
+		if not item or item[0] is None:
+			return None, None
+		x, y = item[0], item[1]
+	if x is None or y is None:
+		return None, None
+	x = to_numpy_2d(x)
+	y = int(y) if not isinstance(y, (list, tuple, np.ndarray)) else int(np.asarray(y).item())
+	return x, y
 
 ##########################
 ##     OS UTILS

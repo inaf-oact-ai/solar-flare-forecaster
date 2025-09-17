@@ -263,7 +263,7 @@ class Uni2TSBatchCollator:
 		labels = []
 		
 		for it in features:
-			x, y = _split_feature(it)
+			x, y = split_feature(it)
 			if x is None:
 				continue
 			T, C = x.shape
