@@ -1422,9 +1422,10 @@ def main():
 		print(focal_alpha)
 		summarize_alpha(focal_alpha, counts)
 	
-	# - Debug printout	
-	print("model.config.id2label:", model.config.id2label)
-	print("model.config.label2id:", model.config.label2id)
+	# - Debug printout
+	if hasattr(model, "config"):
+		print("model.config.id2label:", model.config.id2label)
+		print("model.config.label2id:", model.config.label2id)
 		
 	# - Set trainer
 	logger.info("Using custom trainer ...")
