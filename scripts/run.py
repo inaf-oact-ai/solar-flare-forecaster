@@ -110,6 +110,8 @@ def get_args():
 	
 	# - Model options
 	parser.add_argument('-model', '--model', dest='model', required=False, type=str, default="google/siglip-so400m-patch14-384", action='store', help='Model pretrained file name or weight path to be loaded {google/siglip-large-patch16-256, google/siglip-base-patch16-256, google/siglip-base-patch16-256-i18n, google/siglip-so400m-patch14-384, google/siglip-base-patch16-224, MCG-NJU/videomae-base, MCG-NJU/videomae-large, OpenGVLab/VideoMAEv2-Large}')
+	parser.add_argument('-model_ts_backbone', '--model_ts_backbone', dest='model_ts_backbone', required=False, type=str, default="Salesforce/moirai-1.1-R-base", action='store', help='Model TS backbone name')
+	
 	parser.add_argument('--vitloader', dest='vitloader', action='store_true', help='If enabled use ViTForImageClassification to load model otherwise AutoModelForImageClassification (default=false)')	
 	parser.set_defaults(vitloader=False)
 	
@@ -464,39 +466,35 @@ def load_ts_model(
 ):
 	"""Load Moirai model for time-series classification (Trainer-compatible)."""
 
-	if inference_mode:
-		# Load trained checkpoint (weights + config)
-		model = MoiraiForSequenceClassification.from_pretrained(args.model)
-		model.eval()
-	else:
-		# Ordinal variant (NOT IMPLEMENTED)
-		if args.ordinal:
-			raise ValueError("Ordinal head not yet implemented for time series data!")
-
-		else:
-			if args.binary:
-				# Start with a 2-class model
-				model = MoiraiForSequenceClassification.from_pretrained(
-					args.model,
-					num_labels=2
-				)
-        
-				# Replace head with 1 logit
-				in_features = model.head[-1].in_features
-				model.head[-1] = torch.nn.Linear(in_features, 1)
-				model.config.num_labels = 1
-				model.config.problem_type = None  # avoid HF inferring wrong loss
+	# - Create model
+	model = MoiraiForSequenceClassification(
+		pretrained_name=args.model_ts_backbone,
+		num_labels=(2 if args.binary else num_labels),
+		freeze_backbone=args.freeze_backbone
+	)
+	
+	# - If binary, replace the final layer with 1-logit head
+	if args.binary:
+		in_features = model.head[-1].in_features  # last Linear
+		model.head[-1] = torch.nn.Linear(in_features, 1)
+		model.config.num_labels = 1
+		if hasattr(model.config, "problem_type"): # avoid HF inferring wrong loss
+			model.config.problem_type = None
             
-			else:
-				# Standard multiclass model
-				model = MoiraiForSequenceClassification.from_pretrained(
-					args.model,
-					num_labels=num_labels,
-					id2label=id2label,
-					label2id=label2id,
-				)
-
-	# No processor needed for TS (your TSDataCollator handles it)
+	# - Ordinal variant (NOT IMPLEMENTED)
+	if args.ordinal:
+		raise ValueError("Ordinal head not yet implemented for time series data!")
+ 
+  # - Inference?
+	if inference_mode:
+	  # - Load trained checkpoint (weights + config)
+		state_path = resolve_state_dict_path(args.model)
+		state = torch.load(state_path, map_location="cpu")
+		# strict=False is handy if your binary/multiclass head shape differs
+		model.load_state_dict(state, strict=True)        
+		model.eval()
+		
+	# - No processor needed for TS (your TSDataCollator handles it)
 	ts_processor = None
 
 	return model, ts_processor
