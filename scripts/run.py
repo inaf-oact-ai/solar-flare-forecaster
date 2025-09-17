@@ -738,6 +738,9 @@ def load_dataset(
 			data_vars=ts_data_vars,
 			logstretch_vars=ts_logstretchs
 		)
+		dataset.compute_ts_var_stats()
+		print("--> ts stats")
+		print(dataset.data_var_stats)
 		
 	nsamples= dataset.get_sample_size()
 	
@@ -772,6 +775,9 @@ def load_dataset(
 				data_vars=ts_data_vars,
 				logstretch_vars=ts_logstretchs
 			)
+			dataset_cv.compute_ts_var_stats()
+			print("--> ts stats (EVAL)")
+			print(dataset_cv.data_var_stats)
 		
 		nsamples_cv= dataset_cv.get_sample_size()
 		logger.info("#%d entries in val dataset ..." % (nsamples_cv))
