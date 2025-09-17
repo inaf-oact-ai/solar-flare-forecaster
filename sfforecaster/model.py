@@ -350,6 +350,10 @@ class MoiraiForSequenceClassification(torch.nn.Module):
 		
 	def forward(self, **batch) -> SequenceClassifierOutput:
 		# Call Moirai with the packed fields your version requires:
+		
+		print("batch")
+		print(batch)
+		
 		out = self.backbone(
 			batch["target"],          # patchified/packed by Collate
 			batch["observed_mask"],
