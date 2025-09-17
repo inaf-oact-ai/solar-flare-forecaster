@@ -487,6 +487,8 @@ def load_ts_model(
 		cfg.id2label  = id2label
 		cfg.label2id  = label2id
 	
+	print("--> cfg")
+	print(cfg)
 	print("--> model.config")
 	print(model.config)
 	print(model.config.to_json_string())
