@@ -358,9 +358,9 @@ class MoiraiForSequenceClassification(torch.nn.Module):
 			batch["target"],          # patchified/packed by Collate
 			batch["observed_mask"],
 			batch["sample_id"],
-			batch["time_id"],
-			batch["variate_id"],
-			batch["prediction_mask"],
+			#batch["time_id"],
+			#batch["variate_id"],
+			#batch["prediction_mask"],
 			True,                     # training_mode
 		)
 		
