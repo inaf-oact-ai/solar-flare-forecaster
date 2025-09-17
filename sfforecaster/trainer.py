@@ -285,8 +285,9 @@ class Uni2TSBatchCollator:
 
 		# Ensure required IDs/masks exist; synthesize if missing.
 		# sample_id is required and should exist already.
-		if "sample_id" not in packed:
-			raise RuntimeError("PackCollate didn't return sample_id; cannot pool per sample.")
+		sample_id = packed.get("sample_id", None)
+		if sample_id is None:
+			raise RuntimeError("PackCollate didn't return 'sample_id'; cannot pool per sample.")
 
 		if isinstance(sample_id, torch.Tensor):
 			sample_id_np = sample_id.detach().cpu().numpy().astype(np.int64)
