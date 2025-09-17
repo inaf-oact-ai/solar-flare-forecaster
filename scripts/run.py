@@ -469,6 +469,8 @@ def load_ts_model(
 
 	# - Create model (lazy head will be created on first forward)
 	num_out= (1 if args.binary else num_labels)
+	print("num_out")
+	print(num_out)
 	
 	model = MoiraiForSequenceClassification(
 		pretrained_name=args.model_ts_backbone,
