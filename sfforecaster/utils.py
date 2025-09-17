@@ -24,6 +24,7 @@ from pathlib import Path
 import shutil
 import stat
 from contextlib import suppress
+from typing import List, Dict, Any, Tuple, Union
 
 ## COMMAND-LINE ARG MODULES
 import getopt
@@ -46,6 +47,8 @@ import torch
 import torchvision.transforms as T
 from torchvision.transforms.functional import InterpolationMode
 import torch.distributed as dist
+
+ArrayLike = Union[np.ndarray, torch.Tensor, list, tuple]
 
 ## DRAW MODULES
 import matplotlib.pyplot as plt
