@@ -36,6 +36,7 @@ from transformers import AutoImageProcessor, AutoModelForImageClassification
 from transformers import ViTImageProcessor, ViTForImageClassification, ViTConfig
 from transformers import VideoMAEImageProcessor, VideoMAEForPreTraining
 from transformers import VideoMAEForVideoClassification
+from transformers import MoiraiForSequenceClassification
 from transformers.configuration_utils import PretrainedConfig
 from transformers.modeling_utils import PreTrainedModel
 from transformers.data.data_collator import DataCollator
