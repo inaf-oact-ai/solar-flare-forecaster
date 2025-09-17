@@ -511,12 +511,15 @@ def load_model(
 	""" Load model & processor """
 	
 	if args.data_modality=="image":
+		logger.info("Loading image model & processor (name=%s) ..." % (args.model))
 		return load_image_model(args, id2label, label2id, num_labels, nclasses, inference_mode)
 
 	elif args.data_modality=="video":
+		logger.info("Loading video model & processor (name=%s) ..." % (args.model))
 		return load_video_model(args, id2label, label2id, num_labels, nclasses, inference_mode)
 		
 	elif args.data_modality=="ts":
+		logger.info("Loading ts model & processor (name=%s) ..." % (args.ts_model_backbone))
 		return load_ts_model(args, id2label, label2id, num_labels, nclasses, inference_mode)
 		
 	else:
@@ -1202,7 +1205,6 @@ def main():
 	#==   LOAD MODEL
 	#===========================
 	# - Load model & processor
-	logger.info("Loading model & processor (name=%s) ..." % (modelname))
 	inference_mode= False
 	if args.test or args.predict:
 		inference_mode= True
