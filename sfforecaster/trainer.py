@@ -288,10 +288,10 @@ class Uni2TSBatchCollator:
 		target = to_np(packed["target"])                 # [B, L, P]
 		obs    = to_np(packed["observed_mask"])          # [B, L, P] (or [B, L] in some commits)
 		B, L = target.shape[0], target.shape[1]
-		print("target.shape")
-		print(target.shape)
-		print("obs.shape")
-		print(obs.shape)		
+		#print("target.shape")
+		#print(target.shape)
+		#print("obs.shape")
+		#print(obs.shape)		
 		
 
 		# Ensure required IDs/masks exist; synthesize if missing.
@@ -307,8 +307,8 @@ class Uni2TSBatchCollator:
 				# expand to [B,L] if needed (rare)
 				packed["sample_id"] = np.tile(packed["sample_id"][None, :], (B, 1))
 
-		print("packed['sample_id'].shape")
-		print(packed["sample_id"].shape)
+		#print("packed['sample_id'].shape")
+		#print(packed["sample_id"].shape)
 
 		# time_id: per-timestep index [B, L]
 		if "time_id" not in packed:
@@ -317,8 +317,8 @@ class Uni2TSBatchCollator:
 		else:
 			packed["time_id"] = to_np(packed["time_id"], np.int64)
     
-		print("packed['time_id'].shape")
-		print(packed["time_id"].shape)
+		#print("packed['time_id'].shape")
+		#print(packed["time_id"].shape)
 		
 		# variate_id: zeros [B, L] (you can encode channel IDs later)
 		if "variate_id" not in packed:
@@ -326,8 +326,8 @@ class Uni2TSBatchCollator:
 		else:
 			packed["variate_id"] = to_np(packed["variate_id"], np.int64)
 		
-		print("packed['variate_id'].shape")
-		print(packed["variate_id"].shape)
+		#print("packed['variate_id'].shape")
+		#print(packed["variate_id"].shape)
 
 		# prediction_mask: all False [B, L] for classification
 		if "prediction_mask" not in packed:
@@ -335,8 +335,8 @@ class Uni2TSBatchCollator:
 		else:
 			packed["prediction_mask"] = to_np(packed["prediction_mask"], np.bool_)
 
-		print("packed['prediction_mask'].shape")
-		print(packed["prediction_mask"].shape)
+		#print("packed['prediction_mask'].shape")
+		#print(packed["prediction_mask"].shape)
 
 		# Finally convert everything numpy→torch with correct dtypes
 		out = {}
