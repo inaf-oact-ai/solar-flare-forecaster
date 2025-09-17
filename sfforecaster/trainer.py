@@ -282,48 +282,63 @@ class Uni2TSBatchCollator:
 
 		packed = self._collate(raw_batch)  # numpy arrays
 		packed["labels"] = np.asarray(labels, dtype=np.int64)
+		
+		
+		# target/observed_mask should already be [B, L, P] (or [B, L] for observed_mask in some builds)
+		target = _to_np(packed["target"])                 # [B, L, P]
+		obs    = _to_np(packed["observed_mask"])          # [B, L, P] (or [B, L] in some commits)
+		B, L = target.shape[0], target.shape[1]
+		print("target.shape")
+		print(target.shape)
+		print("obs.shape")
+		print(obs.shape)		
+		
 
 		# Ensure required IDs/masks exist; synthesize if missing.
-		# sample_id is required and should exist already.
-	
-		# 1) Normalize/flatten sample_id to 1-D
-		if "sample_id" not in packed:
-			raise RuntimeError("PackCollate did not return 'sample_id'.")
-		sample_id_np = as_numpy_int64(packed["sample_id"]).ravel()   # [N_tokens]
-
-		# 2) Ensure/flatten observed_mask (keep original for backbone); no change needed here
-		# target should already be [N_tokens, patch_dim]
-		N_tokens = sample_id_np.size
-
-		# 3) time_id: 0..(len-1) within each sample (1-D)
-		if "time_id" in packed:
-			time_id_np = _as_numpy_int64(packed["time_id"]).ravel()
-		else:
-			time_id_np = np.empty(N_tokens, dtype=np.int64)
-			# compute per-sample ranks
-			for sid in np.unique(sample_id_np):
-				idx = np.nonzero(sample_id_np == sid)[0]           # 1-D indices into rows
-				time_id_np[idx] = np.arange(idx.size, dtype=np.int64)
 		
-		# 4) variate_id: zeros (1-D). You can encode channel ids later if desired.
-		if "variate_id" in packed:
-			variate_id_np = _as_numpy_int64(packed["variate_id"]).ravel()
+		# sample_id should be [B, L] in your build — don't flatten it
+		if "sample_id" not in packed:
+			# Fill with row indices (0..B-1)
+			sample_id = np.tile(np.arange(B, dtype=np.int64)[:, None], (1, L))
+			packed["sample_id"] = sample_id
 		else:
-			variate_id_np = np.zeros(N_tokens, dtype=np.int64)
+			packed["sample_id"] = _to_np(packed["sample_id"], np.int64)
+			if packed["sample_id"].ndim == 1:
+				# expand to [B,L] if needed (rare)
+				packed["sample_id"] = np.tile(packed["sample_id"][None, :], (B, 1))
 
-		# 5) prediction_mask: all False for classification (1-D)
-		if "prediction_mask" in packed:
-			prediction_mask_np = _as_numpy_bool(packed["prediction_mask"]).ravel()
+		print("packed['sample_id'].shape")
+		print(packed["sample_id"].shape)
+
+		# time_id: per-timestep index [B, L]
+		if "time_id" not in packed:
+			time_id = np.tile(np.arange(L, dtype=np.int64)[None, :], (B, 1))
+			packed["time_id"] = time_id
 		else:
-			prediction_mask_np = np.zeros(N_tokens, dtype=np.bool_)
+			packed["time_id"] = _to_np(packed["time_id"], np.int64)
+    
+    print("packed['time_id'].shape")
+		print(packed["time_id"].shape)
+		
+		# variate_id: zeros [B, L] (you can encode channel IDs later)
+		if "variate_id" not in packed:
+			packed["variate_id"] = np.zeros((B, L), dtype=np.int64)
+		else:
+			packed["variate_id"] = _to_np(packed["variate_id"], np.int64)
+		
+		print("packed['variate_id'].shape")
+		print(packed["variate_id"].shape)
 
-		# 6) Overwrite packed with the 1-D versions the backbone expects
-		packed["sample_id"]       = sample_id_np
-		packed["time_id"]         = time_id_np
-		packed["variate_id"]      = variate_id_np
-		packed["prediction_mask"] = prediction_mask_np
-				
-		# 7) Finally convert everything numpy→torch with correct dtypes
+		# prediction_mask: all False [B, L] for classification
+		if "prediction_mask" not in packed:
+			packed["prediction_mask"] = np.zeros((B, L), dtype=np.bool_)
+		else:
+			packed["prediction_mask"] = _to_np(packed["prediction_mask"], np.bool_)
+
+		print("packed['prediction_mask'].shape")
+		print(packed["prediction_mask"].shape)
+
+		# Finally convert everything numpy→torch with correct dtypes
 		out = {}
 		for k, v in packed.items():
 			if isinstance(v, np.ndarray):
@@ -900,6 +915,7 @@ class CustomTrainer(Trainer):
 		
 		# - Retrieve features & labels
 		if "target" in inputs and "sample_id" in inputs:     # Uni2TS packed batch
+			dbg(inputs)	 # debug printout
 			outputs = model(**inputs)
 		else:
 			features = inputs.get("pixel_values") or inputs.get("input")

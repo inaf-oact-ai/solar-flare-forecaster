@@ -354,37 +354,14 @@ class MoiraiForSequenceClassification(torch.nn.Module):
 		print("batch")
 		print(batch)
 		
-		# synthesize missing ids/masks if needed
-		sid = batch.get("sample_id", None)
-		tgt = batch.get("target", None)
-		if sid is None or tgt is None:
-			raise ValueError("Expected packed Uni2TS fields: at least target and sample_id.")
-
-		# flatten sample_id to [N_tokens]
-		sample_id = sid.reshape(-1)
-		N_tokens = sample_id.numel()
-
-		if "time_id" not in batch:
-			time_id = torch.zeros_like(sample_id)
-			for s in torch.unique(sample_id):
-				idx = (sample_id == s).nonzero(as_tuple=False).squeeze(-1)
-				time_id[idx] = torch.arange(idx.numel(), device=sample_id.device, dtype=sample_id.dtype)
-			batch["time_id"] = time_id
-
-		if "variate_id" not in batch:
-			batch["variate_id"] = torch.zeros_like(sample_id)
-
-		if "prediction_mask" not in batch:
-			batch["prediction_mask"] = torch.zeros(N_tokens, dtype=torch.bool, device=sample_id.device)
-		
 		out = self.backbone(
-			batch["target"],          # patchified/packed by Collate
-			batch["observed_mask"],
-			batch["sample_id"],
-			batch["time_id"],
-			batch["variate_id"],
-			batch["prediction_mask"],
-			True,                     # training_mode
+			batch["target"],          # [B, L, P]
+			batch["observed_mask"],   # [B, L, P]
+			batch["sample_id"],       # [B, L]
+			batch["time_id"],         # [B, L]
+			batch["variate_id"],      # [B, L]
+			batch["prediction_mask"], # [B, L]
+			True,
 		)
 		
 		# out may be a tuple/dict; prefer a tensor called 'reprs' / first tensor
@@ -396,20 +373,27 @@ class MoiraiForSequenceClassification(torch.nn.Module):
 			reprs = out
 		assert isinstance(reprs, torch.Tensor)
 
-		# Flatten token grid to [N_tokens, d]
-		if reprs.dim() == 3:
+		# reprs likely [B, L, d]
+		if reprs.dim() == 2:  # rare; reshape if needed
+			reprs = reprs.view(batch["sample_id"].shape[0], batch["sample_id"].shape[1], -1)
 			B, L, D = reprs.shape
-			reprs = reprs.reshape(B * L, D)
 
-		# Pool by original sample via sample_id
-		sample_id = batch["sample_id"].reshape(-1)  # [N_tokens]
-		B = int(sample_id.max().item()) + 1
-		d = reprs.size(-1)
-		pooled = torch.zeros(B, d, device=reprs.device, dtype=reprs.dtype)
-		for sid in range(B):
-			mask = (sample_id == sid)
-			pooled[sid] = reprs[mask].mean(dim=0)
+
+		# Build a 2-D valid timestep mask: observed at any patch and not in prediction window
+		obs = batch["observed_mask"]
+		if obs.dim() == 3:              # [B, L, P] → reduce over patch
+			valid_obs = obs.any(dim=-1) # [B, L]
+		else:
+			valid_obs = obs             # already [B, L]
+    
+		valid = valid_obs & (~batch["prediction_mask"])    # [B, L]
+		weights = valid.float()                             # 1.0 for valid, 0.0 otherwise
+		den = weights.sum(dim=1, keepdim=True).clamp_min(1.0)  # [B,1] avoid div/0
+
+		# masked mean over timesteps
+		pooled = (reprs * weights.unsqueeze(-1)).sum(dim=1) / den  # [B, d]
 
 		logits = self.head(pooled)  # [B, num_labels]
+
 		return SequenceClassifierOutput(logits=logits)	
 		

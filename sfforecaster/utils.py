@@ -143,6 +143,14 @@ def split_feature(item: Union[Dict[str, Any], Tuple[Any, Any], List[Any]]):
 	y = int(y) if not isinstance(y, (list, tuple, np.ndarray)) else int(np.asarray(y).item())
 	return x, y
 	
+def _to_np(x, dtype=None):
+	if isinstance(x, torch.Tensor):
+		x = x.detach().cpu().numpy()
+	x = np.asarray(x)
+	if dtype is not None:
+		x = x.astype(dtype)
+	return x
+    	
 def as_numpy_int64(x):
 	if isinstance(x, torch.Tensor):
 		return x.detach().cpu().numpy().astype(np.int64)
@@ -154,6 +162,11 @@ def as_numpy_bool(x):
 		return x.detach().cpu().numpy().astype(np.bool_)
 	arr = np.asarray(x)
 	return arr.astype(np.bool_)
+
+def dbg(b):
+	for k,v in b.items():
+		if hasattr(v, "shape"):
+			print(k, tuple(v.shape), v.dtype)
 
 ##########################
 ##     OS UTILS
