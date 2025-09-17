@@ -261,21 +261,40 @@ class Uni2TSBatchCollator:
 		# Prepare "raw" samples in Uni2TS expected pre-collate form
 		raw_batch = []
 		labels = []
+		
 		for f in features:
-			x = torch.tensor(f["input"], dtype=torch.float32)  # [T,C]
+			# f["input"] shape: [T, C] (float32)
+			x = f["input"]
+			if isinstance(x, torch.Tensor):
+				x = x.detach().cpu().numpy()
+			x = np.asarray(x, dtype=np.float32)  # [T,C]
+			assert x.ndim == 2, f"expected [T,C], got {x.shape}"
 			T, C = x.shape
+
+			obs = np.ones((T, C), dtype=bool)  # all observed; adjust if you have gaps
+
 			raw_batch.append({
-				"target": x,                                   # [T,C]
-				"observed_mask": torch.ones(T, C, dtype=torch.bool),
-				# No explicit prediction window for classification
+				"target": x,            # [T,C] float32
+				"observed_mask": obs,   # [T,C] bool
 			})
 			labels.append(int(f["labels"]))
 
 		# Collate/pack → adds sample_id, time_id, variate_id, prediction_mask, and patchifies target
 		packed = self._collate(raw_batch)
-
+	        
 		# Keep labels separately (classification head pools per-sample via sample_id)
 		packed["labels"] = torch.tensor(labels, dtype=torch.long)
+
+		# Convert numpy arrays in 'packed' to tensors
+		for k, v in list(packed.items()):
+			if isinstance(v, np.ndarray):
+				# booleans stay bool, others become float32/int64 as appropriate
+				if v.dtype == np.bool_:
+					packed[k] = torch.from_numpy(v.astype(np.bool_))
+				elif np.issubdtype(v.dtype, np.integer):
+					packed[k] = torch.from_numpy(v.astype(np.int64))
+				else:
+					packed[k] = torch.from_numpy(v.astype(np.float32))
 
 		return packed	
 	
