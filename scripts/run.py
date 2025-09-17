@@ -738,7 +738,7 @@ def load_dataset(
 			multiout=args.multiout,
 			multilabel=args.multilabel,
 			ordinal=args.ordinal,
-			data_vars=ts_data_vars,
+			data_vars=ts_vars,
 			logstretch_vars=ts_logstretchs
 		)
 		dataset.compute_ts_var_stats()
