@@ -47,7 +47,8 @@ from sfforecaster import logger
 
 # - MOIRAI
 try:
-	from uni2ts.data.loader import Collate
+	#from uni2ts.data.loader import Collate
+	from uni2ts.data.loader import PackCollate as _Collate
 except Exception:
 	logger.warning("Cannot import uni2ts collate method (not an error if using images/videos) ...")
 
@@ -249,7 +250,7 @@ class Uni2TSBatchCollator:
 	def __init__(self, context_length: int, patch_size: int):
 		# Collate args: target_field name must match what backbone expects ("target")
 		# max_length ≈ context_length (will be patched/packed inside)
-		self._collate = Collate(
+		self._collate = _Collate(
 			target_field="target",
 			seq_fields=("target", "observed_mask"),
 			max_length=context_length,

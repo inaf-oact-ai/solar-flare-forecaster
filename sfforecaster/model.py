@@ -338,13 +338,51 @@ class MoiraiForSequenceClassification(torch.nn.Module):
 		logits = self.head(pooled)                   # [B,K]
 		return SequenceClassifierOutput(logits=logits)
 		
+	#def forward(self, **batch) -> SequenceClassifierOutput:
+	#	"""
+	#		Expects the **packed** batch produced by Uni2TS collator:
+	#		target, observed_mask, sample_id, time_id, variate_id, prediction_mask, labels
+	#	"""
+	#	reprs = self._backbone_forward(batch)
+	#	pooled = self._pool_by_sample(reprs, batch["sample_id"])
+	#	logits = self.head(pooled)  # [B, num_labels]
+	#	return SequenceClassifierOutput(logits=logits)	
+		
 	def forward(self, **batch) -> SequenceClassifierOutput:
-		"""
-			Expects the **packed** batch produced by Uni2TS collator:
-			target, observed_mask, sample_id, time_id, variate_id, prediction_mask, labels
-		"""
-		reprs = self._backbone_forward(batch)
-		pooled = self._pool_by_sample(reprs, batch["sample_id"])
+		# Call Moirai with the packed fields your version requires:
+		out = self.backbone(
+			batch["target"],          # patchified/packed by Collate
+			batch["observed_mask"],
+			batch["sample_id"],
+			batch["time_id"],
+			batch["variate_id"],
+			batch["prediction_mask"],
+			True,                     # training_mode
+		)
+		
+		# out may be a tuple/dict; prefer a tensor called 'reprs' / first tensor
+		if isinstance(out, dict):
+			reprs = out.get("reprs") or out.get("hidden_states") or out.get("x")
+		elif isinstance(out, (list, tuple)):
+			reprs = out[0]
+		else:
+			reprs = out
+		assert isinstance(reprs, torch.Tensor)
+
+		# Flatten token grid to [N_tokens, d]
+		if reprs.dim() == 3:
+			B, L, D = reprs.shape
+			reprs = reprs.reshape(B * L, D)
+
+		# Pool by original sample via sample_id
+		sample_id = batch["sample_id"].reshape(-1)  # [N_tokens]
+		B = int(sample_id.max().item()) + 1
+		d = reprs.size(-1)
+		pooled = torch.zeros(B, d, device=reprs.device, dtype=reprs.dtype)
+		for sid in range(B):
+			mask = (sample_id == sid)
+			pooled[sid] = reprs[mask].mean(dim=0)
+
 		logits = self.head(pooled)  # [B, num_labels]
-		return SequenceClassifierOutput(logits=logits)		
+		return SequenceClassifierOutput(logits=logits)	
 		
