@@ -186,8 +186,8 @@ class MoiraiForSequenceClassification(torch.nn.Module):
 		super().__init__()
 		self.backbone = _M.from_pretrained(pretrained_name)
 		
-		#d_model = getattr(self.backbone, "d_model", 384)
-		#self.config = MoiraiTSConfig(num_labels=num_labels, d_model=d_model)
+		d_model = getattr(self.backbone, "d_model", 384)
+		self.config = MoiraiTSConfig(num_labels=num_labels, d_model=d_model)
 
 		#if freeze_backbone:
 		#	for p in self.backbone.parameters():
