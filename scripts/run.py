@@ -481,9 +481,9 @@ def load_ts_model(
 		model.config.num_labels = num_out
 		model.config.id2label = id2label
 		model.config.label2id = label2id
-		print("--> model.config")
-		print(model.config)
-
+		
+	print("--> model.config")
+	print(model.config)
 
 	# - If binary, replace the final layer with 1-logit head
 	#if args.binary:
