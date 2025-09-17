@@ -467,20 +467,26 @@ def load_ts_model(
 ):
 	"""Load Moirai model for time-series classification (Trainer-compatible)."""
 
-	# - Create model
+	# - Create model (lazy head will be created on first forward)    
 	model = MoiraiForSequenceClassification(
 		pretrained_name=args.model_ts_backbone,
-		num_labels=(2 if args.binary else num_labels),
+		num_labels=(1 if args.binary else num_labels),
 		freeze_backbone=args.freeze_backbone
 	)
 	
+	# keep config in sync for your Trainer / metrics
+	if hasattr(model, "config"):
+		model.config.num_labels = num_out
+		model.config.id2label = id2label
+		model.config.label2id = label2id
+
 	# - If binary, replace the final layer with 1-logit head
-	if args.binary:
-		in_features = model.head[-1].in_features  # last Linear
-		model.head[-1] = torch.nn.Linear(in_features, 1)
-		model.config.num_labels = 1
-		if hasattr(model.config, "problem_type"): # avoid HF inferring wrong loss
-			model.config.problem_type = None
+	#if args.binary:
+	#	in_features = model.head[-1].in_features  # last Linear
+	#	model.head[-1] = torch.nn.Linear(in_features, 1)
+	#	model.config.num_labels = 1
+	#	if hasattr(model.config, "problem_type"): # avoid HF inferring wrong loss
+	#		model.config.problem_type = None
             
 	# - Ordinal variant (NOT IMPLEMENTED)
 	if args.ordinal:
