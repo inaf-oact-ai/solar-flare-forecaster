@@ -288,24 +288,32 @@ class Uni2TSBatchCollator:
 		if "sample_id" not in packed:
 			raise RuntimeError("PackCollate didn't return sample_id; cannot pool per sample.")
 
-		N_tokens = packed["target"].shape[0] if packed["target"].ndim == 2 else packed["target"].shape[0]  # [N_tokens, patch]
-		sample_id = packed["sample_id"].reshape(-1)  # [N_tokens]
+		if isinstance(sample_id, torch.Tensor):
+			sample_id_np = sample_id.detach().cpu().numpy().astype(np.int64)
+		else:
+			sample_id_np = np.asarray(sample_id).astype(np.int64)
 
-		# time_id: 0..(count-1) within each sample_id
+		N_tokens = sample_id_np.shape[0]
+
+		#N_tokens = packed["target"].shape[0] if packed["target"].ndim == 2 else packed["target"].shape[0]  # [N_tokens, patch]
+		#sample_id = packed["sample_id"].reshape(-1)  # [N_tokens]
+		
+		# time_id: 0..(len-1) within each sample
 		if "time_id" not in packed:
-			time_id = np.zeros_like(sample_id)
-			for sid in np.unique(sample_id):
-				idx = np.where(sample_id == sid)[0]
-				time_id[idx] = np.arange(len(idx), dtype=sample_id.dtype)
+			time_id = np.empty_like(sample_id_np, dtype=np.int64)
+			# vectorized-ish fill
+			for sid in np.unique(sample_id_np):
+				idx = np.nonzero(sample_id_np == sid)[0]
+				time_id[idx] = np.arange(idx.size, dtype=np.int64)
 			packed["time_id"] = time_id
-
-		# variate_id: all zeros (you can encode channel index here if you have it)
+    
+		# variate_id: zeros (you can encode channel id later if needed)
 		if "variate_id" not in packed:
-			packed["variate_id"] = np.zeros_like(sample_id)
+			packed["variate_id"] = np.zeros(N_tokens, dtype=np.int64)
 
-		# prediction_mask: all False (classification doesn’t forecast)
+		# prediction_mask: all False for classification
 		if "prediction_mask" not in packed:
-			packed["prediction_mask"] = np.zeros_like(sample_id, dtype=bool)
+			packed["prediction_mask"] = np.zeros(N_tokens, dtype=np.bool_)
 
 		# numpy → torch (preserve dtypes)
 		out: Dict[str, torch.Tensor] = {}
