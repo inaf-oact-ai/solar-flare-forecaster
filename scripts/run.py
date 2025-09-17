@@ -486,7 +486,8 @@ def load_ts_model(
 		
 	print("--> model.config")
 	print(model.config)
-
+	print(model.config.to_json_string())
+	
 	# - If binary, replace the final layer with 1-logit head
 	#if args.binary:
 	#	in_features = model.head[-1].in_features  # last Linear
