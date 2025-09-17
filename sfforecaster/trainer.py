@@ -285,8 +285,8 @@ class Uni2TSBatchCollator:
 		
 		
 		# target/observed_mask should already be [B, L, P] (or [B, L] for observed_mask in some builds)
-		target = _to_np(packed["target"])                 # [B, L, P]
-		obs    = _to_np(packed["observed_mask"])          # [B, L, P] (or [B, L] in some commits)
+		target = to_np(packed["target"])                 # [B, L, P]
+		obs    = to_np(packed["observed_mask"])          # [B, L, P] (or [B, L] in some commits)
 		B, L = target.shape[0], target.shape[1]
 		print("target.shape")
 		print(target.shape)
@@ -302,7 +302,7 @@ class Uni2TSBatchCollator:
 			sample_id = np.tile(np.arange(B, dtype=np.int64)[:, None], (1, L))
 			packed["sample_id"] = sample_id
 		else:
-			packed["sample_id"] = _to_np(packed["sample_id"], np.int64)
+			packed["sample_id"] = to_np(packed["sample_id"], np.int64)
 			if packed["sample_id"].ndim == 1:
 				# expand to [B,L] if needed (rare)
 				packed["sample_id"] = np.tile(packed["sample_id"][None, :], (B, 1))
@@ -315,7 +315,7 @@ class Uni2TSBatchCollator:
 			time_id = np.tile(np.arange(L, dtype=np.int64)[None, :], (B, 1))
 			packed["time_id"] = time_id
 		else:
-			packed["time_id"] = _to_np(packed["time_id"], np.int64)
+			packed["time_id"] = to_np(packed["time_id"], np.int64)
     
 		print("packed['time_id'].shape")
 		print(packed["time_id"].shape)
@@ -324,7 +324,7 @@ class Uni2TSBatchCollator:
 		if "variate_id" not in packed:
 			packed["variate_id"] = np.zeros((B, L), dtype=np.int64)
 		else:
-			packed["variate_id"] = _to_np(packed["variate_id"], np.int64)
+			packed["variate_id"] = to_np(packed["variate_id"], np.int64)
 		
 		print("packed['variate_id'].shape")
 		print(packed["variate_id"].shape)
@@ -333,7 +333,7 @@ class Uni2TSBatchCollator:
 		if "prediction_mask" not in packed:
 			packed["prediction_mask"] = np.zeros((B, L), dtype=np.bool_)
 		else:
-			packed["prediction_mask"] = _to_np(packed["prediction_mask"], np.bool_)
+			packed["prediction_mask"] = to_np(packed["prediction_mask"], np.bool_)
 
 		print("packed['prediction_mask'].shape")
 		print(packed["prediction_mask"].shape)

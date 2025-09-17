@@ -143,7 +143,7 @@ def split_feature(item: Union[Dict[str, Any], Tuple[Any, Any], List[Any]]):
 	y = int(y) if not isinstance(y, (list, tuple, np.ndarray)) else int(np.asarray(y).item())
 	return x, y
 	
-def _to_np(x, dtype=None):
+def to_np(x, dtype=None):
 	if isinstance(x, torch.Tensor):
 		x = x.detach().cpu().numpy()
 	x = np.asarray(x)
