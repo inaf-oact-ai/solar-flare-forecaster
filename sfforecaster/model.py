@@ -281,89 +281,81 @@ class MoiraiForSequenceClassification(torch.nn.Module):
 		x  = batch["target"]          # [B, L, C]
 		obs= batch["observed_mask"]   # [B, L, C] (or [B, L] in some builds)
 		
-		# 1) read backbone expectations
-		# infer the in_features the embed wants (384 for moirai-2.0-R-small)
-		patch_size = getattr(self.backbone, "patch_size", 32)
-		try:
-			in_features = self.backbone.in_proj.weight.shape[1]  # [out, in]
-		except Exception:
-			# fallback: commonly d_ff
-			in_features = getattr(self.backbone, "d_ff", patch_size * x.size(-1))
-		
-		
+		# 1) read patch_size & expected input width of ts_embed
+		patch_size = getattr(self.backbone, "patch_size", 16)  
+		in_proj = getattr(self.backbone, "in_proj", None)
+		if in_proj is None or not hasattr(in_proj, "hidden_layer"):
+			raise RuntimeError("Backbone has no in_proj.hidden_layer; cannot infer expected input width.")
+		# PyTorch Linear weight is [out_features, in_features]
+		Wexp = in_proj.hidden_layer.in_features    # ← this is 384 in your env
+    
 		print("patch_size")
 		print(patch_size)
-		print("in_features")
-		print(in_features)
+		print("in_proj")
+		print(in_proj)
+		print("Wexp")
+		print(Wexp)
 		
-		# expected variates (channels)
-		Creq = max(1, in_features // patch_size)
-		print("Creq")
-		print(Creq)
-		
+		# 2) ts_embed concatenates (values + mask) → factor = 2
+		concat_factor = 2
+		Creq = Wexp // (concat_factor * patch_size)  # e.g. 384 / (2*16) = 12
+
 		B, L, C = x.shape
-		device  = x.device
-		dtype   = x.dtype
+		device, dtype = x.device, x.dtype
 		
-		# 2) pad channels if you have fewer than expected
+		# 3) make obs 3-D if needed
+		if obs.dim() == 2:
+			obs = obs.unsqueeze(-1).expand(B, L, C)
+
+		# 4) pad/truncate channels to Creq
 		if C < Creq:
 			pad = torch.zeros(B, L, Creq - C, dtype=dtype, device=device)
-			x   = torch.cat([x, pad], dim=-1)                       # [B, L, Creq]
-			if obs.dim() == 3:
-				# padded channels are "unobserved"
-				obs_pad = torch.zeros(B, L, Creq - C, dtype=torch.bool, device=device)
-				obs     = torch.cat([obs, obs_pad], dim=-1)         # [B, L, Creq]
+			x   = torch.cat([x, pad], dim=-1)
+			obs = torch.cat([obs, torch.zeros_like(pad, dtype=torch.bool)], dim=-1)
 		elif C > Creq:
-			# If you ever pass more than expected, truncate (or decide a mapping)
 			x   = x[..., :Creq]
-			if obs.dim() == 3:
-				obs = obs[..., :Creq]
-		
+			obs = obs[..., :Creq]
+
 		print("obs")
 		print(obs.shape)
 		
-		# 3) make sure observed_mask is 3-D so we can patchify it
-		if obs.dim() == 2:
-			obs = obs.unsqueeze(-1).expand(B, L, Creq)  # [B, L, Creq]
-		
-		print("obs")
-		print(obs.shape)
-		
-		# 4) truncate L to multiple of patch_size and patchify
+		# 5) truncate L to multiple of patch_size and patchify
 		Lp = (L // patch_size) * patch_size
 		if Lp == 0:
-			raise RuntimeError("Sequence too short for the chosen patch_size.")
+			raise RuntimeError(f"Sequence too short for patch_size={patch_size}.")
 		if Lp != L:
 			x   = x[:, :Lp, :]
 			obs = obs[:, :Lp, :]
-		
+
+		Ltok = Lp // patch_size
+		x    = x.view(B, Ltok, patch_size * Creq).contiguous()       # [B, L', P*Creq]
+		obs  = obs.view(B, Ltok, patch_size * Creq).contiguous()     # [B, L', P*Creq] (bool)
+
 		print("Lp")
 		print(Lp)
 		
-		# patchify: [B, Lp, Creq] → [B, L', patch_size*Creq], with L' = Lp/ps
-		Ltok = Lp // patch_size
-		x    = x.view(B, Ltok, patch_size * Creq).contiguous()        # float
-		obs  = obs.view(B, Ltok, patch_size * Creq).contiguous()      # bool
-
-		# 5) rebuild the id/mask tensors so shapes match [B, Ltok]
+		# 6) rebuild ids/masks to match L'
 		time_id         = torch.arange(Ltok, device=device).view(1, -1).expand(B, Ltok)
 		sample_id       = torch.arange(B,    device=device).view(-1, 1).expand(B, Ltok)
 		variate_id      = torch.zeros(B, Ltok, dtype=torch.long, device=device)
 		prediction_mask = torch.zeros(B, Ltok, dtype=torch.bool, device=device)
 
-		# 6) store back into the batch dict
-		batch["target"]           = x
-		batch["observed_mask"]    = obs
-		batch["time_id"]          = time_id
-		batch["sample_id"]        = sample_id
-		batch["variate_id"]       = variate_id
-		batch["prediction_mask"]  = prediction_mask
-		
-		print("→ target:", tuple(batch["target"].shape))
-		print("→ obs   :", tuple(batch["observed_mask"].shape))
-		print("→ ids   :", tuple(batch["sample_id"].shape), tuple(batch["time_id"].shape))
-		print("→ pmask :", tuple(batch["prediction_mask"].shape))
-		print("→ expected in_features:", in_features, "patch_size:", patch_size, "Creq:", Creq)
+		batch["target"]          = x
+		batch["observed_mask"]   = obs
+		batch["time_id"]         = time_id
+		batch["sample_id"]       = sample_id
+		batch["variate_id"]      = variate_id
+		batch["prediction_mask"] = prediction_mask
+
+		# Optional one-time prints
+		if not hasattr(self, "_dbg_geom"):
+			print("patch_size", patch_size)
+			print("Wexp (hidden_layer.in_features)", Wexp)
+			print("Creq", Creq)
+			print("→ target:", tuple(x.shape))
+			print("→ obs   :", tuple(obs.shape))
+			print("→ ids   :", tuple(sample_id.shape), tuple(time_id.shape))
+			self._dbg_geom = True
 		
 		# ---- now call the backbone with aligned shapes ----
 		out = self.backbone(
