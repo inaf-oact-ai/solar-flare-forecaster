@@ -1265,7 +1265,9 @@ def main():
 			for name, param in model.base_model.named_parameters():
 				print(name, param.requires_grad)	
 		except Exception as e:
-			logger.warning(f"Cannot print model base parameters (err={str(e)} ...")	
+			logger.warning(f"Cannot print model base parameters (err={str(e)}, trying alternative method ...")	
+			for name, param in model.backbone.named_parameters():
+				print(name, param.requires_grad)	
 				
 		logger.info("Print entire model info ...")
 		for name, param in model.named_parameters():
