@@ -118,6 +118,34 @@ def resolve_state_dict_path(model_path: str) -> str | None:
 
 	return None
 	
+	
+def find_state_dict_file(path: str) -> Path:
+
+	p = Path(path)
+	if p.is_file():
+		return p
+
+	# Look inside a checkpoint dir
+	candidates = [
+		p / "model.safetensors",
+		p / "pytorch_model.bin",
+		p / "pytorch_model.pt",            # just in case
+	]
+	for c in candidates:
+		if c.exists():
+			return c
+
+	# If we get here, print what's inside to help debugging
+	contents = [q.name for q in p.glob("*")]
+	raise FileNotFoundError(
+		f"No state_dict file found in: {p}\n"
+		f"Tried: {[c.name for c in candidates]}\n"
+		f"Found instead: {contents}\n"
+		f"(It looks like you may be pointing to 'training_args.bin'. "
+		f"Pass the checkpoint directory or the weights file, not training_args.bin.)"
+	)
+    
+	
 def to_numpy_2d(x: ArrayLike) -> np.ndarray:
 	"""Convert input to float32 numpy array of shape [T, C]. Accepts [T,C] or [T] (→ [T,1])."""
 	if isinstance(x, torch.Tensor):
