@@ -564,17 +564,23 @@ def freeze_model(model, args):
 	if args.data_modality=="image":	
 		encoder_name= "vision_model.encoder"
 		layer_search_pattern= "layers"
+		model_base= model.base_model
 		
 	elif args.data_modality=="video":
 		encoder_name= "encoder"
 		layer_search_pattern= "layer"
+		model_base= model.base_model
 		
 	else: # Nothing to be done
+		encoder_name= "encoder"
+		layer_search_pattern= "layer"
+		model_base= model.backbone
 		return
 	
 	# - Freeze layers
 	logger.info("Freezing model base layers ...")
-	for name, param in model.base_model.named_parameters():	
+	#for name, param in model.base_model.named_parameters():
+	for name, param in model_base.named_parameters():	
 		if name.startswith(encoder_name):
 			layer_index= extract_layer_id(name, layer_search_pattern)
 			if args.max_freeze_layer_id==-1 or (args.max_freeze_layer_id>=0 and layer_index!=-1 and layer_index<args.max_freeze_layer_id):
