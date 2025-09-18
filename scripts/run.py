@@ -517,27 +517,12 @@ def load_ts_model(
 		#model.load_state_dict(state, strict=True)        
 		#model.eval()
 		
-		ckpt_file = find_state_dict_file(args.model)  # args.model can be a dir or a file
-		logger.info(f"Loading weights from checkpoint {ckpt_file} (model path={args.model}) ...")
-		
-		# Retrieve model checkpoint, if saved safetensors, import lazily (optional). Otherwise torch.load is fine for .bin
-		state = torch.load(str(ckpt_file), map_location="cpu")
-		if not isinstance(state, dict):
-			# Some tooling saves {'state_dict': ...}
-			if isinstance(state, (list, tuple)) or hasattr(state, "state_dict"):
-				try:
-					state = state.state_dict()  # e.g., Lightning wrapper
-				except Exception:
-					pass
-		if isinstance(state, dict) and "state_dict" in state and isinstance(state["state_dict"], dict):
-			state = state["state_dict"]  # unwrap
-
-		# - Load weights
-		# strict=False is handy if your binary/multiclass head shape differs
+		ckpt = args.model  # can be a file OR a checkpoint dir
+		logger.info(f"Loading weights from path {args.model} ...")
+		state = load_state_dict_any(ckpt)
 		missing, unexpected = model.load_state_dict(state, strict=False)
 		if missing or unexpected:
-			print(f"[load_ts_model] load_state_dict warnings -> missing: {missing}, unexpected: {unexpected}")
-		
+			print(f"[load_ts_model] load_state_dict -> missing: {missing[:6]} ... | unexpected: {unexpected[:6]} ...")
 		model.eval()
 		
 	# - No processor needed for TS (your TSDataCollator handles it)

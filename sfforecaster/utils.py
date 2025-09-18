@@ -89,61 +89,73 @@ def barrier_if_distributed():
 	if dist.is_available() and dist.is_initialized():
 		dist.barrier()
 
-def resolve_state_dict_path(model_path: str) -> str | None:
-	"""
-		If model_path points to a fine-tuned checkpoint directory or file, return the .bin path.
-	"""
-	if not model_path:
-		return None
-
-	if os.path.isdir(model_path):
-		# Typical HF save
-		cand = os.path.join(model_path, "pytorch_model.bin")
-		if os.path.exists(cand):
-			return cand
-		
-		# Sometimes users keep a "final" symlink/folder — look inside
-		cand2 = os.path.join(model_path, "final", "pytorch_model.bin")
-		if os.path.exists(cand2):
-			return cand2
-        
-		# Accept direct .bin inside dir (pick first)
-		for f in os.listdir(model_path):
-			if f.endswith(".bin"):
-				return os.path.join(model_path, f)
-
-	# Direct file path
-	if os.path.isfile(model_path) and model_path.endswith(".bin"):
-		return model_path
-
-	return None
-	
-	
-def find_state_dict_file(path: str) -> Path:
-
+def find_weight_files(path: str) -> list[Path]:
+	"""Return an ordered list of weight files to load."""
 	p = Path(path)
 	if p.is_file():
-		return p
+		# user passed a file directly
+		return [p]
 
-	# Look inside a checkpoint dir
-	candidates = [
-		p / "model.safetensors",
-		p / "pytorch_model.bin",
-		p / "pytorch_model.pt",            # just in case
-	]
-	for c in candidates:
-		if c.exists():
-			return c
+	# user passed a directory (checkpoint-XXXX)
+	# prefer safetensors first, then torch .bin
+	st_single = p / "model.safetensors"
+	pt_single = p / "pytorch_model.bin"
 
-	# If we get here, print what's inside to help debugging
-	contents = [q.name for q in p.glob("*")]
+	if st_single.exists():
+		return [st_single]
+	if pt_single.exists():
+		return [pt_single]
+
+	# sharded safetensors: model-00001-of-0000N.safetensors
+	shards = sorted(p.glob("model-*-of-*.safetensors"), key=lambda x: int(re.search(r"(\d+)-of-\d+\.safetensors$", x.name).group(1)))
+	if shards:
+		return shards
+
+	# last resort: any *.safetensors or *.bin (but never training_args.bin)
+	cands = list(p.glob("*.safetensors")) + [q for q in p.glob("*.bin") if q.name != "training_args.bin"]
+	if cands:
+		# prefer safetensors; maintain a stable order
+		cands = sorted(cands, key=lambda x: (x.suffix != ".safetensors", x.name))
+		return cands
+
+	# help diagnose: print contents
+	found = [q.name for q in p.glob("*")]
 	raise FileNotFoundError(
-		f"No state_dict file found in: {p}\n"
-		f"Tried: {[c.name for c in candidates]}\n"
-		f"Found instead: {contents}\n"
-		f"(It looks like you may be pointing to 'training_args.bin'. "
-		f"Pass the checkpoint directory or the weights file, not training_args.bin.)"
+		f"No model weights found in {p}. "
+		f"Looked for model.safetensors / sharded safetensors / pytorch_model.bin. "
+		f"Directory contains: {found}"
 	)
+
+def load_state_dict_any(path_or_dir: str) -> dict:
+	"""Load state_dict from either .safetensors (single or shards) or .bin."""
+	paths = find_weight_files(path_or_dir)
+
+	state = {}
+	if paths[0].suffix == ".safetensors":
+		# safetensors: can be single or sharded
+		from safetensors.torch import load_file as safe_load
+    for f in paths:
+			shard = safe_load(str(f))
+			# merge shards (keys are disjoint)
+			overlap = set(state).intersection(shard)
+			if overlap:
+				raise RuntimeError(f"Overlapping keys across shards: {sorted(list(overlap))[:5]}")
+			state.update(shard)
+		return state
+	else:
+		# torch .bin
+		obj = torch.load(str(paths[0]), map_location="cpu")
+		# unwrap common containers
+		if isinstance(obj, dict):
+			if "state_dict" in obj and isinstance(obj["state_dict"], dict):
+				obj = obj["state_dict"]
+			elif "model" in obj and isinstance(obj["model"], dict):
+				obj = obj["model"]
+		elif hasattr(obj, "state_dict"):
+			obj = obj.state_dict()
+		if not isinstance(obj, dict):
+			raise TypeError(f"Loaded object is not a state_dict. Got {type(obj)} from {paths[0]}")
+		return obj
     
 	
 def to_numpy_2d(x: ArrayLike) -> np.ndarray:
