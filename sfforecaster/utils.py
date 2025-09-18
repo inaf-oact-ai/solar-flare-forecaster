@@ -134,7 +134,7 @@ def load_state_dict_any(path_or_dir: str) -> dict:
 	if paths[0].suffix == ".safetensors":
 		# safetensors: can be single or sharded
 		from safetensors.torch import load_file as safe_load
-    for f in paths:
+		for f in paths:
 			shard = safe_load(str(f))
 			# merge shards (keys are disjoint)
 			overlap = set(state).intersection(shard)
