@@ -1260,9 +1260,12 @@ def main():
 		logger.info("Freezing model base layers ...")
 		model= freeze_model(model, args)
 		
-		logger.info("Print base model info ...")	
-		for name, param in model.base_model.named_parameters():
-			print(name, param.requires_grad)	
+		try:
+			logger.info("Print base model info ...")	
+			for name, param in model.base_model.named_parameters():
+				print(name, param.requires_grad)	
+		except Exception as e:
+			logger.warning(f"Cannot print model base parameters (err={str(e)} ...")	
 				
 		logger.info("Print entire model info ...")
 		for name, param in model.named_parameters():
