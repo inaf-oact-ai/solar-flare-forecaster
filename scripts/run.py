@@ -575,7 +575,7 @@ def freeze_model(model, args):
 		encoder_name= "encoder"
 		layer_search_pattern= "layer"
 		model_base= model.backbone
-		return
+		return model
 	
 	# - Freeze layers
 	logger.info("Freezing model base layers ...")
