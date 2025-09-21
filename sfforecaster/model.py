@@ -390,8 +390,8 @@ class MoiraiForSequenceClassification(torch.nn.Module):
 			print("patch_size", patch_size)
 			print("Wexp (hidden_layer.in_features)", Wexp)
 			print("Creq", Creq)
-			print("→ target:", tuple(x.shape))
-			print("→ obs   :", tuple(obs.shape))
+			print("→ target:", tuple(x_tok.shape))
+			print("→ obs   :", tuple(obs_tok.shape))
 			print("→ ids   :", tuple(sample_id.shape), tuple(time_id.shape))
 			self._dbg_geom = True
 		
