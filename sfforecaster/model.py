@@ -182,10 +182,14 @@ class MoiraiForSequenceClassification(torch.nn.Module):
 		self, 
 		pretrained_name: str = "Salesforce/moirai-2.0-R-small",
 		num_labels: int = 4, 
-		freeze_backbone: bool = False
+		freeze_backbone: bool = False,
+		patching_mode: str = "time_only" # "time_only" | "time_variate"
 	):
 		super().__init__()
 		self.backbone = _M.from_pretrained(pretrained_name)
+		
+		assert patching_mode in ("time_only", "time_variate")
+		self.patching_mode = patching_mode
 		
 		d_model = getattr(self.backbone, "d_model", 384)
 		self.config = MoiraiTSConfig(num_labels=num_labels, d_model=d_model)
@@ -292,14 +296,33 @@ class MoiraiForSequenceClassification(torch.nn.Module):
 		if obs.dim() == 2:
 			obs = obs.unsqueeze(-1).expand(B, L, C)
 
-		# 4) pad/truncate channels to Creq
-		if C < Creq:
-			pad = torch.zeros(B, L, Creq - C, dtype=dtype, device=device)
-			x   = torch.cat([x, pad], dim=-1)
-			obs = torch.cat([obs, torch.zeros_like(pad, dtype=torch.bool)], dim=-1)
-		elif C > Creq:
-			x   = x[..., :Creq]
-			obs = obs[..., :Creq]
+		# 4) pad/truncate channels to Creq, depending on patching mode
+		#if C < Creq:
+		#	pad = torch.zeros(B, L, Creq - C, dtype=dtype, device=device)
+		#	x   = torch.cat([x, pad], dim=-1)
+		#	obs = torch.cat([obs, torch.zeros_like(pad, dtype=torch.bool)], dim=-1)
+		#elif C > Creq:
+		#	x   = x[..., :Creq]
+		#	obs = obs[..., :Creq]
+			
+		# 4) Channel handling depends on patching mode
+		if self.patching_mode == "time_only":
+			# Mix channels inside each temporal patch.
+			if C < Creq:
+				pad = torch.zeros(B, L, Creq - C, dtype=dtype, device=device)
+				x   = torch.cat([x, pad], dim=-1)
+				obs = torch.cat([obs, torch.zeros_like(pad, dtype=torch.bool)], dim=-1)
+			elif C > Creq:
+				x   = x[..., :Creq]
+				obs = obs[..., :Creq]			
+		else:
+			# "time_variate": preserve ALL variates as separate tokens (expect Creq≈1 for Moirai2-small).
+			# We do NOT truncate variates here; we will expand token length by C below.
+			if Creq != 1:
+				# Defensive check: Moirai2-small (Wexp=32, ps=16) implies Creq=1. Warn but proceed.
+				if not hasattr(self, "_warned_creq"):
+					logger.warning(f"Time_variate expects Creq=1; got Creq={Creq}. Proceeding, but per-variate tokens will still use last-dim size (patch_size*Creq).")
+					self._warned_creq = True		
 
 		#print("obs")
 		#print(obs.shape)
@@ -313,20 +336,49 @@ class MoiraiForSequenceClassification(torch.nn.Module):
 			obs = obs[:, :Lp, :]
 
 		Ltok = Lp // patch_size
-		x    = x.view(B, Ltok, patch_size * Creq).contiguous()       # [B, L', P*Creq]
-		obs  = obs.view(B, Ltok, patch_size * Creq).contiguous()     # [B, L', P*Creq] (bool)
-
-		#print("Lp")
-		#print(Lp)
 		
-		# 6) rebuild ids/masks to match L'
-		time_id         = torch.arange(Ltok, device=device).view(1, -1).expand(B, Ltok)
-		sample_id       = torch.arange(B,    device=device).view(-1, 1).expand(B, Ltok)
-		variate_id      = torch.zeros(B, Ltok, dtype=torch.long, device=device)
-		prediction_mask = torch.zeros(B, Ltok, dtype=torch.bool, device=device)
+		#x    = x.view(B, Ltok, patch_size * Creq).contiguous()       # [B, L', P*Creq]
+		#obs  = obs.view(B, Ltok, patch_size * Creq).contiguous()     # [B, L', P*Creq] (bool)
+		
+		if self.patching_mode == "time_only":
+			# [B, L, Creq] -> [B, L', ps*Creq]
+			x_view   = x[:, :Lp, :].contiguous().view(B, Ltok, patch_size * Creq)
+			obs_view = obs[:, :Lp, :].contiguous().view(B, Ltok, patch_size * Creq)
+			x_tok, obs_tok = x_view, obs_view                       # [B, L', P]
+			N = Ltok
+			# IDs
+			time_id   = torch.arange(Ltok, device=device).view(1, -1).expand(B, Ltok)
+			sample_id = torch.arange(B,    device=device).view(-1, 1).expand(B, Ltok)
+			variate_id= torch.zeros(B, Ltok, dtype=torch.long, device=device)
+		else:
+			# Per-variate tokens:
+			# reshape to [B, L', ps, C] -> permute to [B, C, L', ps] -> flatten to [B, C*L', ps*Creq]
+			x_blk   = x[:, :Lp, :].contiguous().view(B, Ltok, patch_size, C).permute(0, 3, 1, 2).contiguous()
+			obs_blk = obs[:, :Lp, :].contiguous().view(B, Ltok, patch_size, C).permute(0, 3, 1, 2).contiguous()
+			x_tok   = x_blk.view(B, C * Ltok, patch_size * Creq)     # typically last dim == patch_size
+			obs_tok = obs_blk.view(B, C * Ltok, patch_size * Creq)
+			N = C * Ltok
+			# IDs
+			# time ids repeat for each variate; variate ids repeat Ltok times
+			time_row  = torch.arange(Ltok, device=device).repeat(C)                 # [C*L']
+			var_row   = torch.arange(C, device=device).repeat_interleave(Ltok)      # [C*L']
+			time_id   = time_row.view(1, -1).expand(B, N).contiguous()
+			variate_id= var_row.view(1, -1).expand(B, N).contiguous().long()
+			sample_id = torch.arange(B, device=device).view(-1, 1).expand(B, N)
 
-		batch["target"]          = x
-		batch["observed_mask"]   = obs
+		# 6) rebuild ids/masks to match L'
+		#time_id         = torch.arange(Ltok, device=device).view(1, -1).expand(B, Ltok)
+		#sample_id       = torch.arange(B,    device=device).view(-1, 1).expand(B, Ltok)
+		#variate_id      = torch.zeros(B, Ltok, dtype=torch.long, device=device)
+		#prediction_mask = torch.zeros(B, Ltok, dtype=torch.bool, device=device)
+		
+		# 6) prediction mask shaped to token length
+		prediction_mask = torch.zeros(B, N, dtype=torch.bool, device=device)
+
+		#batch["target"]          = x
+		#batch["observed_mask"]   = obs
+		batch["target"]          = x_tok
+		batch["observed_mask"]   = obs_tok
 		batch["time_id"]         = time_id
 		batch["sample_id"]       = sample_id
 		batch["variate_id"]      = variate_id
@@ -352,16 +404,6 @@ class MoiraiForSequenceClassification(torch.nn.Module):
 			batch["prediction_mask"], # [B, Ltok]
 			True,
 		)
-		
-		#out = self.backbone(
-		#	batch["target"],          # [B, L, P]
-		#	batch["observed_mask"],   # [B, L, P]
-		#	batch["sample_id"],       # [B, L]
-		#	batch["time_id"],         # [B, L]
-		#	batch["variate_id"],      # [B, L]
-		#	batch["prediction_mask"], # [B, L]
-		#	True,
-		#)
 		
 		#print("type(out)")
 		#print(type(out))

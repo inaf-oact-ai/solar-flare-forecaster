@@ -108,6 +108,7 @@ def get_args():
 	parser.add_argument('-ts_logstretchs', '--ts_logstretchs', dest='ts_logstretchs', required=False, type=str, default='0,0', action='store', help='Log stretch TS vars separated by commas (1=enable, 0=disable). Must have same dimension of ts_vars.')	
 	parser.add_argument('-ts_vars', '--ts_vars', dest='ts_vars', required=False, type=str, default='xrs_flux_ratio,flare_hist', action='store', help='Resize size in pixels used if --resize option is enabled (default=224)')
 	parser.add_argument('-ts_npoints', '--ts_npoints', dest='ts_npoints', required=False, type=int, default=1440, action='store',help='Number of points in ts features (default=1440)')
+	parser.add_argument("--ts_patching_mode", dest='ts_patching_mode', type=str, choices=["time_only", "time_variate"], default="time_only", help="Patching mode to be used with input ts variates")
 	
 	# - Model options
 	parser.add_argument('-model', '--model', dest='model', required=False, type=str, default="google/siglip-so400m-patch14-384", action='store', help='Model pretrained file name or weight path to be loaded {google/siglip-large-patch16-256, google/siglip-base-patch16-256, google/siglip-base-patch16-256-i18n, google/siglip-so400m-patch14-384, google/siglip-base-patch16-224, MCG-NJU/videomae-base, MCG-NJU/videomae-large, OpenGVLab/VideoMAEv2-Large}')
@@ -141,6 +142,8 @@ def get_args():
 	parser.add_argument('--freeze_backbone', dest='freeze_backbone', action='store_true',help='Make backbone layers are non-tranable (default=false)')	
 	parser.set_defaults(freeze_backbone=False)
 	parser.add_argument('-max_freeze_layer_id', '--max_freeze_layer_id', dest='max_freeze_layer_id', required=False, type=int, default=-1, action='store',help='ID of the last layer kept frozen. -1 means all are frozen if --freeze_backbone option is enabled (default=-1)')
+	
+	
 	
 	# - Model training options
 	parser.add_argument('--run_eval_on_start', dest='run_eval_on_start', action='store_true',help='Run model evaluation on start for debug (default=false)')	
@@ -475,7 +478,8 @@ def load_ts_model(
 	model = MoiraiForSequenceClassification(
 		pretrained_name=args.model_ts_backbone,
 		num_labels=num_out,
-		freeze_backbone=args.freeze_backbone
+		freeze_backbone=args.freeze_backbone,
+		patching_mode=args.ts_patching_mode
 	)
 	
 	# keep config in sync for your Trainer / metrics
