@@ -287,7 +287,7 @@ class MoiraiForSequenceClassification(torch.nn.Module):
 		
 		# 2) ts_embed concatenates (values + mask) → factor = 2
 		concat_factor = 2
-		Creq = Wexp // (concat_factor * patch_size)  # e.g. 384 / (2*16) = 12
+		Creq = Wexp // (concat_factor * patch_size)  # e.g. 32 / (2*16) = 1
 
 		B, L, C = x.shape
 		device, dtype = x.device, x.dtype
@@ -313,6 +313,7 @@ class MoiraiForSequenceClassification(torch.nn.Module):
 				x   = torch.cat([x, pad], dim=-1)
 				obs = torch.cat([obs, torch.zeros_like(pad, dtype=torch.bool)], dim=-1)
 			elif C > Creq:
+				logger.warning(f"Truncating C={C} variates to {Creq}, last {C-Creq} variates will be ignored, need to modify patch_size to include all variates with time_only patching (better switch to time_variate) ...")
 				x   = x[..., :Creq]
 				obs = obs[..., :Creq]			
 		else:
