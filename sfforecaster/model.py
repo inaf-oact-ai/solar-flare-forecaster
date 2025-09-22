@@ -646,17 +646,47 @@ class ImageFeatTSClassifier(torch.nn.Module):
 			import types
 			from uni2ts.module import packed_scaler as _ps
 
-			_orig_get_loc_scale = _ps.PackedStdScaler._get_loc_scale
+			# 1) resolve the class name across uni2ts versions
+			ScalerClass = getattr(_ps, "PackedStdScaler", None) or getattr(_ps, "PackedStandardScaler", None)
 
-			def _get_loc_scale_no_inplace(self, *args, **kwargs):
-				loc, scale = _orig_get_loc_scale(self, *args, **kwargs)
-				# Make sure subsequent in-place ops won't mutate what autograd saved.
-				# Also keep fp32 math stable.
-				return loc, scale.to(torch.float32).clone()
+			def _wrap_class_level(ScalerClass):
+				# Prefer to patch _get_loc_scale if present, else patch forward()
+				if hasattr(ScalerClass, "_get_loc_scale"):
+					_orig = ScalerClass._get_loc_scale
+					def _get_loc_scale_no_inplace(self, *args, **kwargs):
+						loc, scale = _orig(self, *args, **kwargs)
+						# Keep fp32 for stable LN math and return a FRESH tensor
+						return loc, scale.to(torch.float32).clone()
+					ScalerClass._get_loc_scale = _get_loc_scale_no_inplace
+					return True
+				elif hasattr(ScalerClass, "forward"):
+					_orig = ScalerClass.forward
+					def _forward_no_inplace(self, *args, **kwargs):
+						loc, scale = _orig(self, *args, **kwargs)
+						return loc, scale.to(torch.float32).clone()
+					ScalerClass.forward = _forward_no_inplace
+					return True
+				return False
 
-				_ps.PackedStdScaler._get_loc_scale = _get_loc_scale_no_inplace
-		except Exception as e:
-			logger.warning(f"Scaler monkey-patch skipped: {e}")
+			patched = False
+			if ScalerClass is not None:
+				patched = _wrap_class_level(ScalerClass)
+
+			# 2) if class-level patch failed (or class not found), patch THIS instance’s scaler
+			if not patched:
+				scaler = getattr(self.backbone, "scaler", None)
+				if scaler is not None and hasattr(scaler, "forward"):
+					_orig = scaler.forward
+					def _forward_no_inplace(*args, **kwargs):
+						loc, scale = _orig(*args, **kwargs)
+						return loc, scale.to(torch.float32).clone()
+					scaler.forward = types.MethodType(_forward_no_inplace, scaler)
+					patched = True
+
+			if not patched:
+				logger.warning("Scaler patch: could not find PackedStdScaler / PackedStandardScaler; instance not patched.")
+			else:
+				logger.info("Scaler patch: OK (returning cloned fp32 'scale').")
 		
 		self.patching_mode = patching_mode
 		self.classifier = None
