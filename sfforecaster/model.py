@@ -550,14 +550,15 @@ class ImageEncoderWrapper(torch.nn.Module):
 	def _freeze_encoder(self):
 		""" Freeze encoder """
 
-		encoder_name= "vision_model.encoder"
+		encoder_name= "encoder"
 		layer_search_pattern= "layers"
 
 		for name, param in self.encoder.named_parameters():
-			print(f"--> name={name}")
+			
 			if name.startswith(encoder_name):
 				layer_index= extract_layer_id(name, layer_search_pattern)
 				if self.max_freeze_layer_id==-1 or (self.max_freeze_layer_id>=0 and layer_index!=-1 and layer_index<self.max_freeze_layer_id):
+					logger.info(f"Freezing layer {name} ...")
 					param.requires_grad = False
 
 	@staticmethod
