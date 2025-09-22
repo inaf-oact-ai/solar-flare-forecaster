@@ -687,7 +687,10 @@ class ImageFeatTSClassifier(torch.nn.Module):
 				logger.warning("Scaler patch: could not find PackedStdScaler / PackedStandardScaler; instance not patched.")
 			else:
 				logger.info("Scaler patch: OK (returning cloned fp32 'scale').")
-		
+
+		except Exception as e:
+			logger.warning(f"Scaler patch failed: {e}")
+
 		self.patching_mode = patching_mode
 		self.classifier = None
 		self.num_labels = num_labels
