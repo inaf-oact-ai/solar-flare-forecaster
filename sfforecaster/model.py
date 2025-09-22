@@ -644,6 +644,14 @@ class ImageFeatTSClassifier(torch.nn.Module):
 		class _Cfg(PretrainedConfig): pass
 		self.config = _Cfg(num_labels=num_labels)
 
+	@property
+	def device(self):
+		try:
+			return next(self.parameters()).device
+		except StopIteration:
+			# model with no params yet
+			return torch.device("cpu")
+
 	def _register_hook_on_any(self, names):
 		for name in names:
 			mod = getattr(self.backbone, name, None)
