@@ -639,6 +639,7 @@ class ImageFeatTSClassifier(torch.nn.Module):
 
 		# moirai backbone + logits head (lazy)
 		self.freeze_backbone = freeze_backbone
+		self.max_freeze_layer_id= max_freeze_layer_id
 		self.backbone = _M.from_pretrained(moirai_pretrained_name)
 		self.patching_mode = patching_mode
 		self.classifier = None
