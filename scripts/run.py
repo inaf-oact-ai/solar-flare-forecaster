@@ -23,7 +23,7 @@ from sklearn.metrics import hamming_loss
 
 # - TORCH
 import torch
-torch.autograd.set_detect_anomaly(True) ### REMOVE LATER
+###torch.autograd.set_detect_anomaly(True)
 from torch.optim import AdamW
 import torchvision.transforms.functional as TF
 import torchvision.transforms as T
