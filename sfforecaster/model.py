@@ -889,6 +889,12 @@ class ImageFeatTSClassifier(torch.nn.Module):
 		# 3) pack for Moirai (build target/observed_mask/ids and patchify)
 		packed = self._pack_for_moirai(feat_seq)               # dict of tensors on same device
 
+		###############
+		##  DEBUG 
+		###############
+		packed["target"] = packed["target"].detach().clone()
+	
+
 		# 4) call backbone
 		out = self.backbone(
 			packed["target"],
