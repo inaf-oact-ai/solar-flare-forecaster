@@ -623,11 +623,12 @@ def freeze_model(model, args):
 		model_base= model.base_model
 		
 	elif args.data_modality=="video":
+		if args.video_model=="imgfeatts":
+			return model
+			
 		encoder_name= "encoder"
 		layer_search_pattern= "layer"
 		model_base= model.base_model
-		if args.video_model=="imgfeatts":
-			return model
 		
 	else: # Nothing to be done
 		encoder_name= "encoder"
