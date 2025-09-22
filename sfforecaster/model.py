@@ -619,13 +619,13 @@ class ImageFeatTSClassifier(torch.nn.Module):
 		self.image_processor= self.image_enc.image_processor
 		
 		# per-timestep projection -> K
-		#self._proj = None          # lazy nn.Linear(D, proj_dim) once we see D
-		#self._proj_dim = proj_dim
-		try:
-			self._proj = torch.nn.LazyLinear(proj_dim)        # created at init ⇒ moved by Trainer.to(device)
-		except Exception:
-			logger.warning("Cannot create LazyLinear layer (old pytorch version?), trying to create it later ...")
-			self._proj = None                           # fallback for older torch; see Fix B
+		self._proj = None          # lazy nn.Linear(D, proj_dim) once we see D
+		self._proj_dim = proj_dim
+		#try:
+		#	self._proj = torch.nn.LazyLinear(proj_dim)        # created at init ⇒ moved by Trainer.to(device)
+		#except Exception:
+		#	logger.warning("Cannot create LazyLinear layer (old pytorch version?), trying to create it later ...")
+		#	self._proj = None                           # fallback for older torch; see Fix B
 		
 		self.ln = torch.nn.LayerNorm(proj_dim, eps=layernorm_eps)
 
@@ -698,11 +698,11 @@ class ImageFeatTSClassifier(torch.nn.Module):
 	#	if self._proj is None:
 	#		self._proj = torch.nn.Linear(feat_dim, self._proj_dim)
 
-	#def _maybe_init_projection(self, feat_dim: int, device: torch.device, dtype: torch.dtype):
-	#	if self._proj is None:
-	#		self._proj = nn.Linear(feat_dim, self._proj_dim)
-	#	# ensure it’s on the same device/dtype as inputs
-	#	self._proj.to(device=device, dtype=dtype)
+	def _maybe_init_projection(self, feat_dim: int, device: torch.device, dtype: torch.dtype):
+		if self._proj is None:
+			self._proj = nn.Linear(feat_dim, self._proj_dim)
+		# ensure it’s on the same device/dtype as inputs
+		self._proj.to(device=device, dtype=dtype)
 	
 	def _frames_to_feats(self, frames: torch.Tensor) -> torch.Tensor:
 		"""frames: [B,T,C,H,W] -> per-frame feats: [B,T,D] (then project->K and LN)"""
@@ -716,13 +716,13 @@ class ImageFeatTSClassifier(torch.nn.Module):
 		x = torch.stack(feats_per_t, dim=1)             # [B, T, D]
 		D = x.size(-1)
 		
-		#self._maybe_init_projection(D, device=x.device, dtype=x.dtype)
-		#x = self._proj(x)                               # [B, T, K]
-		#x = self.ln(x)                                  # [B, T, K]
+		self._maybe_init_projection(D, device=x.device, dtype=x.dtype)
+		x = self._proj(x)                               # [B, T, K]
+		x = self.ln(x)                                  # [B, T, K]
 		
 		# x: [B, T, D]
-		x = self._proj(x)    # LazyLinear will infer D the first time
-		x = self.ln(x)       # [B, T, K]
+		#x = self._proj(x)    # LazyLinear will infer D the first time
+		#x = self.ln(x)       # [B, T, K]
 		
 		return x
 
