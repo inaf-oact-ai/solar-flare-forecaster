@@ -1045,6 +1045,10 @@ def run_predict(
 				do_normalize=image_processor.do_normalize if args.use_model_processor else False,              # set to True only if processor should normalize
 				do_rescale=image_processor.do_rescale if args.use_model_processor else False                  # set to True only if processor should rescale
 			)
+			if input_tensor is None:
+				logger.warning("Skip None tensor at index %d ..." % (i))
+				continue
+				
 		elif args.data_modality=="video":
 			input_tensor= load_video_for_inference(
 				dataset=dataset, 
@@ -1054,6 +1058,10 @@ def run_predict(
 				do_normalize=image_processor.do_normalize if args.use_model_processor else False,              # set to True only if processor should normalize
 				do_rescale=image_processor.do_rescale if args.use_model_processor else False                  # set to True only if processor should rescale
 			)
+			if input_tensor is None:
+				logger.warning("Skip None tensor at index %d ..." % (i))
+				continue
+				
 		elif args.data_modality=="ts":
 			input_batch= load_ts_for_inference(
 				dataset=dataset, 
@@ -1061,14 +1069,12 @@ def run_predict(
 				#device=device,
         #use_only_first_variate=True if args.ts_patching_mode=="time_only" else False
 			)
+			if input_batch is None:
+				logger.warning("Skip None input batch at index %d ..." % (i))
+				continue
 		else:
 			raise ValueError(f"Data modality {args.data_modality} not supported!")
-			
-		if input_tensor is None:
-			logger.warning("Skip None tensor at index %d ..." % (i))
-			continue
-			
-			
+						
 		###input_tensor= input_tensor.unsqueeze(0).to(device)
 		#input_tensor= input_tensor.to(device)
  
