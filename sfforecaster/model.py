@@ -615,7 +615,7 @@ class ImageFeatTSClassifier(torch.nn.Module):
 		if _M is None:
 			raise RuntimeError("uni2ts not available; cannot build Moirai backbone.")
 
-		# Create image encoder (as in your code)
+		# - Create image encoder
 		self.image_enc= ImageEncoderWrapper(
 			image_model_name,
 			freeze_backbone=freeze_img_backbone,
