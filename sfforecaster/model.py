@@ -754,9 +754,13 @@ class ImageFeatTSClassifier(torch.nn.Module):
 		D = x.size(-1)
 		
 		self._maybe_init_projection(D, device=x.device, dtype=x.dtype)
-		x = self._proj(x)                               # [B, T, K]
-		x = self.ln(x)                                  # [B, T, K]
 		
+		# Project + LayerNorm in a consistent dtype and ensure no aliasing
+		x = self._proj(x)                               # [B, T, K]
+		# (Optional) keep LN math in fp32 and cast back if you sometimes feed fp16/bf16
+		x = self.ln(x.float()).to(x.dtype)             # [B, T, K]
+		x = x.contiguous()
+
 		# x: [B, T, D]
 		#x = self._proj(x)    # LazyLinear will infer D the first time
 		#x = self.ln(x)       # [B, T, K]
@@ -804,8 +808,11 @@ class ImageFeatTSClassifier(torch.nn.Module):
 				obs = obs[:, :Lp, :]
             
 			Ltok = Lp // patch_size
-			x_tok   = X.view(B, Ltok, patch_size * Creq)
-			obs_tok = obs.view(B, Ltok, patch_size * Creq)
+			#x_tok   = X.view(B, Ltok, patch_size * Creq)
+			#obs_tok = obs.view(B, Ltok, patch_size * Creq)
+			x_tok   = X.view(B, Ltok, patch_size * Creq).clone()     # break aliasing to LN output
+			obs_tok = obs.view(B, Ltok, patch_size * Creq).clone()
+
 			N = Ltok
 			time_id    = torch.arange(Ltok, device=device).view(1, -1).expand(B, Ltok)
 			sample_id  = torch.arange(B,    device=device).view(-1, 1).expand(B, Ltok)
@@ -826,10 +833,15 @@ class ImageFeatTSClassifier(torch.nn.Module):
             
 			Ltok = Lp // patch_size
 			# [B,L, C] → [B, L', ps, C] → [B, C, L', ps] → [B, C*L', ps*Creq]
+			#x_blk   = X.view(B, Ltok, patch_size, C).permute(0, 3, 1, 2).contiguous()
+			#obs_blk = obs.view(B, Ltok, patch_size, C).permute(0, 3, 1, 2).contiguous()
+			#x_tok   = x_blk.view(B, C * Ltok, patch_size * Creq)
+			#obs_tok = obs_blk.view(B, C * Ltok, patch_size * Creq)
 			x_blk   = X.view(B, Ltok, patch_size, C).permute(0, 3, 1, 2).contiguous()
 			obs_blk = obs.view(B, Ltok, patch_size, C).permute(0, 3, 1, 2).contiguous()
-			x_tok   = x_blk.view(B, C * Ltok, patch_size * Creq)
-			obs_tok = obs_blk.view(B, C * Ltok, patch_size * Creq)
+			x_tok   = x_blk.view(B, C * Ltok, patch_size * Creq).clone()
+			obs_tok = obs_blk.view(B, C * Ltok, patch_size * Creq).clone()
+			
 			N = C * Ltok
 			time_row   = torch.arange(Ltok, device=device).repeat(C)
 			var_row    = torch.arange(C, device=device).repeat_interleave(Ltok)
@@ -859,6 +871,9 @@ class ImageFeatTSClassifier(torch.nn.Module):
         
 		# 2) concat extra covariates on channel axis (→ [B,T,K+C_extra])
 		if extra_ts is not None:
+			# Keep a single dtype across the sequence to avoid mixed fp64/fp32 graphs
+			extra_ts = extra_ts.to(feat_seq.dtype)
+
 			if extra_ts.size(-1) != feat_seq.size(1):
 				raise ValueError(f"extra_ts T={extra_ts.size(-1)} != frames T={feat_seq.size(1)}")
 			# extra_ts is [B, C_extra, T] → [B, T, C_extra]
