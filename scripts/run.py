@@ -23,6 +23,7 @@ from sklearn.metrics import hamming_loss
 
 # - TORCH
 import torch
+torch.autograd.set_detect_anomaly(True) ### REMOVE LATER
 from torch.optim import AdamW
 import torchvision.transforms.functional as TF
 import torchvision.transforms as T
@@ -1537,6 +1538,11 @@ def main():
 	if args.data_modality == "ts":
 		logger.info("Using custom trainer for time-series data ...")
 		TrainerClass = CustomTrainerTS
+	elif args.data_modality == "video":
+		if args.video_model=="imgfeatts":
+			TrainerClass = CustomTrainerTS
+		else:
+			TrainerClass = CustomTrainer
 	else:
 		logger.info("Using custom trainer ...")
 		TrainerClass = CustomTrainer

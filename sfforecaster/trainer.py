@@ -12,6 +12,7 @@ import random
 import math
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple, Union
 import gc
+from contextlib import nullcontext
 
 # - TORCH
 import torch
@@ -1159,6 +1160,14 @@ class CustomTrainerTS(CustomTrainer):
 		TS-only variant: override prediction_step so HF can collect preds/labels.
 		This leaves the base CustomTrainer behavior unchanged for image/video.
 	"""
+	
+	def training_step(self, model, inputs):
+		# Enable only for the first few steps to reduce overhead
+		enable = (self.state.global_step < 5)
+		ctx = torch.autograd.detect_anomaly() if enable else nullcontext()
+		with ctx:
+			return super().training_step(model, inputs)
+	
 	def prediction_step(
 		self,
 		model: torch.nn.Module,
