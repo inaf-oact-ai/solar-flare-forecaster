@@ -554,11 +554,10 @@ class ImageEncoderWrapper(torch.nn.Module):
 		layer_search_pattern= "layers"
 
 		for name, param in self.encoder.named_parameters():
-			
 			if name.startswith(encoder_name):
 				layer_index= extract_layer_id(name, layer_search_pattern)
 				if self.max_freeze_layer_id==-1 or (self.max_freeze_layer_id>=0 and layer_index!=-1 and layer_index<self.max_freeze_layer_id):
-					logger.info(f"Freezing layer {name} ...")
+					print(f"Freezing layer {name} ...")
 					param.requires_grad = False
 
 	@staticmethod
@@ -605,6 +604,7 @@ class ImageFeatTSClassifier(torch.nn.Module):
 		proj_dim: int = 128,
 		patching_mode: str = "time_variate",  # "time_only" | "time_variate"
 		freeze_backbone: bool = False,
+		max_freeze_layer_id: int = -1,
 		freeze_img_backbone: bool = False,
 		max_img_freeze_layer_id: int = -1,
 		trust_remote_code: bool = True,
@@ -673,8 +673,18 @@ class ImageFeatTSClassifier(torch.nn.Module):
 		# - Freeze Moirai encoder layers
 		if self.freeze_backbone:
 			logger.info("Freezing Moirai encoder ...")
-			for p in self.backbone.parameters():
-				p.requires_grad = False
+			#for p in self.backbone.parameters():
+			#	p.requires_grad = False
+
+			encoder_name= "encoder"
+			layer_search_pattern= "layers"
+
+			for name, param in self.backbone.named_parameters():
+				if name.startswith(encoder_name):
+					layer_index= extract_layer_id(name, layer_search_pattern)
+					if self.max_freeze_layer_id==-1 or (self.max_freeze_layer_id>=0 and layer_index!=-1 and layer_index<self.max_freeze_layer_id):
+						print(f"Freezing Moirai layer {name} ...")
+						param.requires_grad = False
 
 	@property
 	def device(self):

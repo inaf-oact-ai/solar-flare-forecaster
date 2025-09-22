@@ -148,6 +148,7 @@ def get_args():
 	
 	parser.add_argument('--ts_freeze_backbone', dest='ts_freeze_backbone', action='store_true',help='Make Moirai backbone layers are non-tranable (default=false)')	
 	parser.set_defaults(ts_freeze_backbone=False)
+	parser.add_argument('-ts_max_freeze_layer_id', '--ts_max_freeze_layer_id', dest='ts_max_freeze_layer_id', required=False, type=int, default=-1, action='store',help='ID of the last layer kept frozen. -1 means all are frozen if --ts_freeze_backbone option is enabled (default=-1)')
 	
 	# - Model training options
 	parser.add_argument('--run_eval_on_start', dest='run_eval_on_start', action='store_true',help='Run model evaluation on start for debug (default=false)')	
@@ -482,6 +483,7 @@ def load_imgfeatts_model(
 		proj_dim=args.proj_dim,
 		patching_mode=args.ts_patching_mode,
 		freeze_backbone=args.ts_freeze_backbone,
+		max_freeze_layer_id=args.ts_max_freeze_layer_id,
 		freeze_img_backbone=args.freeze_backbone,
 		max_img_freeze_layer_id=args.max_freeze_layer_id,
 	)
