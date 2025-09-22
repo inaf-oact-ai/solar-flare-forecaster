@@ -646,7 +646,7 @@ class ImageFeatTSClassifier(torch.nn.Module):
 			import types
 			from uni2ts.module import packed_scaler as _ps
 
-			_orig_get_loc_scale = _ps.PackedStandardScaler._get_loc_scale
+			_orig_get_loc_scale = _ps.PackedStdScaler._get_loc_scale
 
 			def _get_loc_scale_no_inplace(self, *args, **kwargs):
 				loc, scale = _orig_get_loc_scale(self, *args, **kwargs)
@@ -654,7 +654,7 @@ class ImageFeatTSClassifier(torch.nn.Module):
 				# Also keep fp32 math stable.
 				return loc, scale.to(torch.float32).clone()
 
-				_ps.PackedStandardScaler._get_loc_scale = _get_loc_scale_no_inplace
+				_ps.PackedStdScaler._get_loc_scale = _get_loc_scale_no_inplace
 		except Exception as e:
 			logger.warning(f"Scaler monkey-patch skipped: {e}")
 		
