@@ -646,7 +646,7 @@ class ImageFeatTSClassifier(torch.nn.Module):
 
 	def _register_hook_on_any(self, names):
 		for name in names:
-    	mod = getattr(self.backbone, name, None)
+			mod = getattr(self.backbone, name, None)
 			if mod is None:
 				continue
 			try:
