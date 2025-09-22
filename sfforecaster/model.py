@@ -21,7 +21,7 @@ from transformers import VideoMAEForVideoClassification
 from transformers import ViTForImageClassification
 from transformers.modeling_outputs import SequenceClassifierOutput
 from transformers.configuration_utils import PretrainedConfig
-from transformers import AutoModelForImageClassification
+from transformers import AutoImageProcessor, AutoModelForImageClassification
 
 # - MODULE
 from sfforecaster.utils import *
