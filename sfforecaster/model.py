@@ -667,7 +667,7 @@ class ImageFeatTSClassifier(torch.nn.Module):
 		# - Freeze image encoder layers?
 		if self.freeze_img_backbone:
 			logger.info("Freezing image encoder ...")
-			self.image_enc.freeze_encoder()
+			self.image_enc._freeze_encoder()
 						
 		# - Freeze Moirai encoder layers
 		if self.freeze_backbone:
