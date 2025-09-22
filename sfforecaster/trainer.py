@@ -928,11 +928,25 @@ class CustomTrainer(Trainer):
 			#dbg(inputs)	 # debug printout
 			outputs = model(**inputs)
 		else:
-			features = inputs.get("pixel_values") or inputs.get("input")
-			outputs = model(features)  # legacy path
+			#features = inputs.get("pixel_values") or inputs.get("input")
+			#outputs = model(features)  # legacy path
 			
-			if torch.isnan(features).any() or torch.isinf(features).any():
-				print("⚠️ NaN values detected in batch features tensor!")
+			features = inputs.get("pixel_values", None)
+			if features is not None:
+				# image/video (and hybrid image→TS) path
+				outputs = model(pixel_values=features)
+			else:
+				features = inputs.get("input", None)
+				if features is None:
+					raise KeyError("Neither 'pixel_values' nor 'input' found in inputs.")
+				# plain TS models that accept raw 'input'
+				outputs = model(features)
+				
+			if torch.is_tensor(features):
+				if torch.isnan(features).any():
+					print("⚠️ NaN values detected in batch features tensor!")
+				if torch.isinf(features).any():
+					print("⚠️ Inf values detected in batch features tensor!")
     
 		labels = inputs.get("labels")
 		logits = outputs.logits
