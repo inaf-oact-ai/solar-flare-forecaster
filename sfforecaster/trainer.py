@@ -1161,12 +1161,12 @@ class CustomTrainerTS(CustomTrainer):
 		This leaves the base CustomTrainer behavior unchanged for image/video.
 	"""
 	
-	def training_step(self, model, inputs):
-		# Enable only for the first few steps to reduce overhead
-		enable = (self.state.global_step < 5)
-		ctx = torch.autograd.detect_anomaly() if enable else nullcontext()
-		with ctx:
-			return super().training_step(model, inputs)
+	#def training_step(self, model, inputs):
+	#	# Enable only for the first few steps to reduce overhead
+	#	enable = (self.state.global_step < 5)
+	#	ctx = torch.autograd.detect_anomaly() if enable else nullcontext()
+	#	with ctx:
+	#		return super().training_step(model, inputs)
 	
 	def prediction_step(
 		self,
