@@ -12,6 +12,7 @@ import random
 import numpy as np
 from typing import Optional
 from contextlib import nullcontext
+import types
 
 # - TORCH
 import torch
