@@ -745,11 +745,16 @@ class ImageFeatTSClassifier(torch.nn.Module):
 		"""frames: [B,T,C,H,W] -> per-frame feats: [B,T,D] (then project->K and LN)"""
 		B, T, C, H, W = frames.shape
 		feats_per_t = []
-		ctx = torch.no_grad() if self.freeze_backbone else nullcontext()
-		with ctx:
-			for t in range(T):
-				f_t = self.image_enc(frames[:, t, ...])  # [B, D]
-				feats_per_t.append(f_t)
+		#ctx = torch.no_grad() if self.freeze_backbone else nullcontext()
+		#with ctx:
+		#	for t in range(T):
+		#		f_t = self.image_enc(frames[:, t, ...])  # [B, D]
+		#		feats_per_t.append(f_t)
+				
+		for t in range(T):
+			f_t = self.image_enc(frames[:, t, ...])  # [B, D]
+			feats_per_t.append(f_t)
+			
 		x = torch.stack(feats_per_t, dim=1)             # [B, T, D]
 		D = x.size(-1)
 		
