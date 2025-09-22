@@ -637,10 +637,27 @@ class ImageFeatTSClassifier(torch.nn.Module):
 		
 		self.ln = torch.nn.LayerNorm(proj_dim, eps=layernorm_eps)
 
-		# moirai backbone + logits head (lazy)
+		# - moirai backbone + logits head (lazy)
 		self.freeze_backbone = freeze_backbone
 		self.max_freeze_layer_id= max_freeze_layer_id
 		self.backbone = _M.from_pretrained(moirai_pretrained_name)
+		
+		try:
+			import types
+			from uni2ts.module import packed_scaler as _ps
+
+			_orig_get_loc_scale = _ps.PackedStandardScaler._get_loc_scale
+
+			def _get_loc_scale_no_inplace(self, *args, **kwargs):
+				loc, scale = _orig_get_loc_scale(self, *args, **kwargs)
+				# Make sure subsequent in-place ops won't mutate what autograd saved.
+				# Also keep fp32 math stable.
+				return loc, scale.to(torch.float32).clone()
+
+				_ps.PackedStandardScaler._get_loc_scale = _get_loc_scale_no_inplace
+		except Exception as e:
+			logger.warning(f"Scaler monkey-patch skipped: {e}")
+		
 		self.patching_mode = patching_mode
 		self.classifier = None
 		self.num_labels = num_labels
@@ -892,8 +909,8 @@ class ImageFeatTSClassifier(torch.nn.Module):
 		###############
 		##  DEBUG 
 		###############
-		packed["target"] = packed["target"].detach().clone()
-	
+		#packed["target"] = packed["target"].detach().clone()
+		###################
 
 		# 4) call backbone
 		out = self.backbone(
