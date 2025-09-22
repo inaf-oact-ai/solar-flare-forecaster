@@ -650,41 +650,69 @@ class ImageFeatTSClassifier(torch.nn.Module):
 		
 		# - Override Moirai scaler
 		scaler = getattr(self.backbone, "scaler", None)
-
-		def _safe_scaler_forward(self, target, observed_mask, sample_id, time_id, variate_id):
+	
+		def _safe_scaler_forward(self, *args, **kwargs):
 			"""
-				Out-of-place packed scaler.
-				Inputs:
-					target:        [B, N, P]      (P = patch_size * Creq)
-					observed_mask: [B, N, P] bool
+				Robust packed scaler that:
+					- accepts any arg signature (v1/v2),
+					- computes loc/scale OUT-OF-PLACE,
+					- returns fresh fp32 tensors, so later in-place ops can't break autograd.
+				Inputs (varies by Uni2TS version):
+					target:        [B, N, P]
+					observed_mask: [B, N, P] (bool)
+					... (we ignore sample_id/time_id/variate_id/prediction_mask if provided)
 				Returns:
-					loc, scale:    [B, N, 1] each (fp32), cloned (fresh storage).
+					loc, scale:    [B, N, 1] each (fp32), cloned.
 			"""
+
+			# 1) Find target & observed_mask, positionally or by name
+			target = None
+			observed_mask = None
+
+			# positional
+			if len(args) >= 1:
+				target = args[0]
+			if len(args) >= 2:
+				observed_mask = args[1]
+
+			# keywords (override if provided)
+			target = kwargs.get("target", target)
+			observed_mask = kwargs.get("observed_mask", observed_mask)
+
+			if target is None:
+				raise ValueError("safe scaler: 'target' not provided")
+			if observed_mask is None:
+				# if mask missing in this Uni2TS build, assume fully observed
+				observed_mask = torch.ones_like(target, dtype=torch.bool)
+
 			x = target
 			m = observed_mask.to(dtype=x.dtype)
 
+			# 2) Masked mean/var per token
 			denom = m.sum(dim=-1, keepdim=True).clamp_min(1.0)
 			loc   = (x * m).sum(dim=-1, keepdim=True) / denom
-
 			xc    = (x - loc) * m
 			var   = (xc * xc).sum(dim=-1, keepdim=True) / denom
 
-			# tolerate either attribute name across uni2ts versions
+			# 3) Small floor; accept either attribute name across versions
 			min_scale = getattr(self, "minimum_scale", None)
 			if min_scale is None:
 				min_scale = getattr(self, "min_scale", 1e-5)
 
+			# 4) Out-of-place sqrt; return fresh fp32 tensors
 			scale = torch.sqrt(var + float(min_scale))
 
-			# return fp32, fresh tensors so downstream in-place ops can't alias autograd buffers
 			return loc.to(torch.float32).clone(), scale.to(torch.float32).clone()
 
 		if scaler is not None and hasattr(scaler, "forward"):
 			scaler.forward = types.MethodType(_safe_scaler_forward, scaler)
-			logger.info("Scaler patch: instance forward() overridden (safe, out-of-place).")
+			try:
+				sig = str(inspect.signature(scaler.forward))
+			except Exception:
+				sig = "<unknown>"
+			logger.info(f"Scaler patch: instance forward() overridden. New signature: {sig}")
 		else:
-			logger.warning("Scaler patch: no scaler found to patch.")
-
+			logger.warning("Scaler patch: no 'scaler' attribute or no forward(); could not patch.")
 		
 		# - Freeze encoders?
 		self._freeze_encoders()
