@@ -764,6 +764,7 @@ class ImageFeatTSClassifier(torch.nn.Module):
 		x = self._proj(x)                               # [B, T, K]
 		# (Optional) keep LN math in fp32 and cast back if you sometimes feed fp16/bf16
 		x = self.ln(x.float()).to(x.dtype)             # [B, T, K]
+		x = x.clone()
 		x = x.contiguous()
 
 		# x: [B, T, D]
