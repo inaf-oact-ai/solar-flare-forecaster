@@ -1055,7 +1055,7 @@ def run_predict(
 				do_rescale=image_processor.do_rescale if args.use_model_processor else False                  # set to True only if processor should rescale
 			)
 		elif args.data_modality=="ts":
-			input_tensor= load_ts_for_inference(
+			input_batch= load_ts_for_inference(
 				dataset=dataset, 
 				idx=i,
 				#device=device,
@@ -1067,12 +1067,24 @@ def run_predict(
 		if input_tensor is None:
 			logger.warning("Skip None tensor at index %d ..." % (i))
 			continue
-		#input_tensor= input_tensor.unsqueeze(0).to(device)
-		input_tensor= input_tensor.to(device)
+			
+			
+		###input_tensor= input_tensor.unsqueeze(0).to(device)
+		#input_tensor= input_tensor.to(device)
+ 
+		if args.data_modality == "ts":
+			input_batch = {k: v.to(device) for k, v in input_batch.items()}
+		else:
+			input_tensor = input_tensor.to(device)
  
  		# - Compute model outputs
 		with torch.no_grad():
-			outputs = model(input_tensor)
+			##outputs = model(input_tensor)
+			if args.data_modality == "ts":
+				outputs = model(**input_batch)
+			else:
+				outputs = model(input_tensor)
+	
 			logits = outputs.logits
 				
   	# - Compute predicted labels & probs
