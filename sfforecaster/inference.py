@@ -14,6 +14,9 @@ import numpy as np
 # - TORCH
 import torch
 
+# - SFFORECASTER MODULE
+from sfforecaster.utils import *
+from sfforecaster import logger
 
 ##############################
 ###   IMAGE LOAD
@@ -90,20 +93,78 @@ def load_video_for_inference(
 ##############################
 ###   TIME-SERIES LOAD
 ##############################
+#def load_ts_for_inference(
+#	dataset, idx, 
+#):
+#	""" Load time series data for inference """
+	
+#	# - Load image from dataset
+#	#   NB: This returns a Tensor of Shape [C,H,W] with transforms applied (if dataset has transform)
+#	input_tensor= dataset.load_ts_tensor(idx)
+	
+#	# - Add batch dim for inference
+#	pixel_values= input_tensor.unsqueeze(0)
+	
+#	return pixel_values
+	
+
 def load_ts_for_inference(
-	dataset, idx, 
-):
-	""" Load time series data for inference """
-	
-	# - Load image from dataset
-	#   NB: This returns a Tensor of Shape [C,H,W] with transforms applied (if dataset has transform)
-	input_tensor= dataset.load_ts_tensor(idx)
-	
-	# - Add batch dim for inference
-	pixel_values= input_tensor.unsqueeze(0)
-	
-	return pixel_values
-	
+	dataset,
+	idx,
+	#patching_mode: str = "time_variate"
+) -> dict[str, torch.Tensor]:
+	"""
+		Build the exact Moirai2 batch your MoiraiForSequenceClassification.forward expects.
+
+		Returns a dict with keys:
+			target:           (B, T, C)   float32
+			observed_mask:    (B, T, C)   bool
+			sample_id:        (B, T)      int64
+			time_id:          (B, T)      int64
+			variate_id:       (B, T)      int64
+			prediction_mask:  (B, T)      bool
+	"""
+	# Load one sample time series tensor from your dataset
+	# Expecting either [T, C] or [C, T]. We normalize to [T, C].
+	x = dataset.load_ts_tensor(idx)  # torch.Tensor
+	if x.dim() != 2:
+		raise ValueError(f"Expected a 2D time series [T,C] or [C,T], got shape {tuple(x.shape)}")
+
+	T, C = x.shape
+	# Heuristic transpose if the first dim looks like channels (tiny) and the second looks like time (large)
+	if T < C:
+		x = x.transpose(0, 1)  # make it [T, C]
+		T, C = x.shape
+
+	# Add batch dimension
+	x = x.unsqueeze(0).contiguous()  # [1, T, C]
+	B = 1
+	device = x.device
+
+	# Observed mask: all True at inference (we’re not masking any observation)
+	observed_mask = torch.ones((B, T, C), dtype=torch.bool, device=device)
+
+	# IDs (placeholders; the model re-derives proper IDs after patching)
+	sample_id = torch.zeros((B, T), dtype=torch.long, device=device)
+	time_id   = torch.arange(T, dtype=torch.long, device=device).unsqueeze(0).expand(B, T)
+	variate_id= torch.zeros((B, T), dtype=torch.long, device=device)
+
+	# No prediction mask at inference (we want to use every timestep)
+	prediction_mask = torch.zeros((B, T), dtype=torch.bool, device=device)
+
+	# Keep a knob for potential future use; today both branches pass the same shapes.
+	#if patching_mode not in ("time_only", "time_variate"):
+	#	raise ValueError(f"Unsupported patching_mode: {patching_mode}")
+
+	batch = {
+		"target": x.float(),
+		"observed_mask": observed_mask,
+		"sample_id": sample_id,
+		"time_id": time_id,
+		"variate_id": variate_id,
+		"prediction_mask": prediction_mask,
+	}
+	return batch	
 	
 ###################################
 ##  ORDINAL HELPERS

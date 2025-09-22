@@ -203,10 +203,67 @@ def as_numpy_bool(x):
 	arr = np.asarray(x)
 	return arr.astype(np.bool_)
 
+
+def as_btc(x: torch.Tensor) -> torch.Tensor:
+	"""
+		Ensure (B, T, C). Accepts (T,), (T,C), or already (B,T,C).
+		Adds batch dim = 1 when needed.
+	"""
+	if x.ndim == 1:          # (T,) -> (T,1)
+		x = x.unsqueeze(-1)
+	if x.ndim == 2:          # (T,C) -> (1,T,C)
+		x = x.unsqueeze(0)
+	elif x.ndim == 3:
+		pass                 # already (B,T,C)
+	else:
+		raise ValueError(f"Unsupported TS shape {tuple(x.shape)}; expected (T,), (T,C) or (B,T,C).")
+	return x
+
 def dbg(b):
 	for k,v in b.items():
 		if hasattr(v, "shape"):
 			print(k, tuple(v.shape), v.dtype)
+			
+def patch_scaler_instance(backbone) -> None:
+	"""
+		Override THIS backbone's scaler.forward with a safe, out-of-place implementation.
+		Works across Uni2TS versions (variable arg signatures).
+	"""
+	import types
+	scaler = getattr(backbone, "scaler", None)
+
+	def _safe_scaler_forward(self, *args, **kwargs):
+		# Accept positional or keyword args; we only need target + observed_mask.
+		target = kwargs.get("target", args[0] if len(args) > 0 else None)
+		observed_mask = kwargs.get("observed_mask", args[1] if len(args) > 1 else None)
+		if target is None:
+			raise ValueError("safe scaler: 'target' not provided")
+		if observed_mask is None:
+			observed_mask = torch.ones_like(target, dtype=torch.bool)
+
+		x = target
+		m = observed_mask.to(dtype=x.dtype)
+
+		denom = m.sum(dim=-1, keepdim=True).clamp_min(1.0)
+		loc   = (x * m).sum(dim=-1, keepdim=True) / denom
+		xc    = (x - loc) * m
+		var   = (xc * xc).sum(dim=-1, keepdim=True) / denom
+
+		# tolerate both attribute names across releases
+		min_scale = getattr(self, "minimum_scale", None)
+		if min_scale is None:
+			min_scale = getattr(self, "min_scale", 1e-5)
+
+		scale = torch.sqrt(var + float(min_scale))
+		# IMPORTANT: return fresh fp32 tensors; no in-place ops afterwards can alias autograd buffers
+		return loc.to(torch.float32).clone(), scale.to(torch.float32).clone()
+
+	if scaler is not None and hasattr(scaler, "forward"):
+		scaler.forward = types.MethodType(_safe_scaler_forward, scaler)
+		print("Scaler patch: instance forward() overridden (safe, out-of-place).")
+	else:
+		print("Scaler patch: no 'scaler' attribute found; skipped.")
+
 
 ##########################
 ##     OS UTILS

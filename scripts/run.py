@@ -114,6 +114,7 @@ def get_args():
 	# - Model options
 	parser.add_argument('-model', '--model', dest='model', required=False, type=str, default="google/siglip-so400m-patch14-384", action='store', help='Model pretrained file name or weight path to be loaded {google/siglip-large-patch16-256, google/siglip-base-patch16-256, google/siglip-base-patch16-256-i18n, google/siglip-so400m-patch14-384, google/siglip-base-patch16-224, MCG-NJU/videomae-base, MCG-NJU/videomae-large, OpenGVLab/VideoMAEv2-Large}')
 	parser.add_argument('-model_ts_backbone', '--model_ts_backbone', dest='model_ts_backbone', required=False, type=str, default="Salesforce/moirai-2.0-R-small", action='store', help='Model TS backbone name')
+	parser.add_argument('-model_ts_img_backbone', '--model_ts_img_backbone', dest='model_ts_img_backbone', required=False, type=str, default="google/siglip2-base-patch16-224", action='store', help='Model imgfeatts image backbone name')
 	
 	parser.add_argument('--vitloader', dest='vitloader', action='store_true', help='If enabled use ViTForImageClassification to load model otherwise AutoModelForImageClassification (default=false)')	
 	parser.set_defaults(vitloader=False)
@@ -478,7 +479,7 @@ def load_imgfeatts_model(
 	print(num_out)
 	
 	model = ImageFeatTSClassifier(
-		image_model_name=args.model,
+		image_model_name=args.model_ts_img_backbone,
 		moirai_pretrained_name=args.model_ts_backbone,
 		num_labels=num_out,
 		proj_dim=args.proj_dim,
@@ -491,12 +492,25 @@ def load_imgfeatts_model(
 	
 	image_processor = model.image_processor
 	
+	# - Ordinal variant (NOT IMPLEMENTED)
+	if args.ordinal:
+		raise ValueError("Ordinal head not yet implemented for time series data!")
+	
 	# - Inference?
 	if inference_mode:
-		# ...
-		# ...
-		raise ValueError("TO BE IMPLEMENTED!!!")
+		# - Patch the scaler exactly like in training (prevents SqrtBackward in-place issues)
+		patch_scaler_instance(model.backbone)
+			
+		# - Load trained checkpoint (weights + config)
+		ckpt = args.model  # can be a file OR a checkpoint dir
+		logger.info(f"Loading weights from path {args.model} ...")
+		state = load_state_dict_any(ckpt)
+		missing, unexpected = model.load_state_dict(state, strict=False)
+		if missing or unexpected:
+			print(f"[load_imgfeatts_model] load_state_dict -> missing: {missing[:6]} ... | unexpected: {unexpected[:6]} ...")
 		
+		model.eval()
+				
 	return model, image_processor
 		
 		
@@ -1043,7 +1057,9 @@ def run_predict(
 		elif args.data_modality=="ts":
 			input_tensor= load_ts_for_inference(
 				dataset=dataset, 
-				idx=i
+				idx=i,
+				#device=device,
+        #use_only_first_variate=True if args.ts_patching_mode=="time_only" else False
 			)
 		else:
 			raise ValueError(f"Data modality {args.data_modality} not supported!")
