@@ -1169,9 +1169,9 @@ def run_train(
 	################
 	##  DEBUG
 	#################
-	print("compute_metrics is None? ->", trainer.compute_metrics is None)
-	metrics = trainer.evaluate()  # triggers evaluation once
-	print("eval metrics keys ->", list(metrics.keys()))
+	#print("compute_metrics is None? ->", trainer.compute_metrics is None)
+	#metrics = trainer.evaluate()  # triggers evaluation once
+	#print("eval metrics keys ->", list(metrics.keys()))
 	#################		
 			
 	# - Run train	
