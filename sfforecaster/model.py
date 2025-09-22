@@ -618,7 +618,7 @@ class ImageFeatTSClassifier(torch.nn.Module):
 		self.image_enc= ImageEncoderWrapper(
 			image_model_name,
 			freeze_backbone=freeze_img_backbone,
-			max_img_freeze_layer_id=max_img_freeze_layer_id,
+			max_freeze_layer_id=max_img_freeze_layer_id,
 			trust_remote_code=trust_remote_code
 		)
 		self.freeze_img_backbone= freeze_img_backbone
