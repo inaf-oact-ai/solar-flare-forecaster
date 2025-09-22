@@ -615,6 +615,15 @@ class ImageFeatTSClassifier(torch.nn.Module):
 		if _M is None:
 			raise RuntimeError("uni2ts not available; cannot build Moirai backbone.")
 
+		# - Set options
+		self.patching_mode = patching_mode
+		self.classifier = None
+		self.num_labels = num_labels
+		self.freeze_img_backbone= freeze_img_backbone
+		self.max_img_freeze_layer_id= max_img_freeze_layer_id
+		self.freeze_backbone = freeze_backbone
+		self.max_freeze_layer_id= max_freeze_layer_id
+		
 		# - Create image encoder
 		self.image_enc= ImageEncoderWrapper(
 			image_model_name,
@@ -622,8 +631,6 @@ class ImageFeatTSClassifier(torch.nn.Module):
 			max_freeze_layer_id=max_img_freeze_layer_id,
 			trust_remote_code=trust_remote_code
 		)
-		self.freeze_img_backbone= freeze_img_backbone
-		self.max_img_freeze_layer_id= max_img_freeze_layer_id
 		self.image_processor= self.image_enc.image_processor
 		
 		# per-timestep projection -> K
@@ -637,64 +644,47 @@ class ImageFeatTSClassifier(torch.nn.Module):
 		
 		self.ln = torch.nn.LayerNorm(proj_dim, eps=layernorm_eps)
 
-		# - moirai backbone + logits head (lazy)
-		self.freeze_backbone = freeze_backbone
-		self.max_freeze_layer_id= max_freeze_layer_id
+		# - Create moirai backbone + logits head (lazy)
 		self.backbone = _M.from_pretrained(moirai_pretrained_name)
 		
-		try:
-			import types
-			from uni2ts.module import packed_scaler as _ps
+		# - Override Moirai scaler
+		scaler = getattr(self.backbone, "scaler", None)
 
-			# 1) resolve the class name across uni2ts versions
-			ScalerClass = getattr(_ps, "PackedStdScaler", None) or getattr(_ps, "PackedStandardScaler", None)
+		def _safe_scaler_forward(self, target, observed_mask, sample_id, time_id, variate_id):
+			"""
+				Out-of-place packed scaler.
+				Inputs:
+					target:        [B, N, P]      (P = patch_size * Creq)
+					observed_mask: [B, N, P] bool
+				Returns:
+					loc, scale:    [B, N, 1] each (fp32), cloned (fresh storage).
+			"""
+			x = target
+			m = observed_mask.to(dtype=x.dtype)
 
-			def _wrap_class_level(ScalerClass):
-				# Prefer to patch _get_loc_scale if present, else patch forward()
-				if hasattr(ScalerClass, "_get_loc_scale"):
-					_orig = ScalerClass._get_loc_scale
-					def _get_loc_scale_no_inplace(self, *args, **kwargs):
-						loc, scale = _orig(self, *args, **kwargs)
-						# Keep fp32 for stable LN math and return a FRESH tensor
-						return loc, scale.to(torch.float32).clone()
-					ScalerClass._get_loc_scale = _get_loc_scale_no_inplace
-					return True
-				elif hasattr(ScalerClass, "forward"):
-					_orig = ScalerClass.forward
-					def _forward_no_inplace(self, *args, **kwargs):
-						loc, scale = _orig(self, *args, **kwargs)
-						return loc, scale.to(torch.float32).clone()
-					ScalerClass.forward = _forward_no_inplace
-					return True
-				return False
+			denom = m.sum(dim=-1, keepdim=True).clamp_min(1.0)
+			loc   = (x * m).sum(dim=-1, keepdim=True) / denom
 
-			patched = False
-			if ScalerClass is not None:
-				patched = _wrap_class_level(ScalerClass)
+			xc    = (x - loc) * m
+			var   = (xc * xc).sum(dim=-1, keepdim=True) / denom
 
-			# 2) if class-level patch failed (or class not found), patch THIS instance’s scaler
-			if not patched:
-				scaler = getattr(self.backbone, "scaler", None)
-				if scaler is not None and hasattr(scaler, "forward"):
-					_orig = scaler.forward
-					def _forward_no_inplace(*args, **kwargs):
-						loc, scale = _orig(*args, **kwargs)
-						return loc, scale.to(torch.float32).clone()
-					scaler.forward = types.MethodType(_forward_no_inplace, scaler)
-					patched = True
+			# tolerate either attribute name across uni2ts versions
+			min_scale = getattr(self, "minimum_scale", None)
+			if min_scale is None:
+				min_scale = getattr(self, "min_scale", 1e-5)
 
-			if not patched:
-				logger.warning("Scaler patch: could not find PackedStdScaler / PackedStandardScaler; instance not patched.")
-			else:
-				logger.info("Scaler patch: OK (returning cloned fp32 'scale').")
+			scale = torch.sqrt(var + float(min_scale))
 
-		except Exception as e:
-			logger.warning(f"Scaler patch failed: {e}")
+			# return fp32, fresh tensors so downstream in-place ops can't alias autograd buffers
+			return loc.to(torch.float32).clone(), scale.to(torch.float32).clone()
 
-		self.patching_mode = patching_mode
-		self.classifier = None
-		self.num_labels = num_labels
+		if scaler is not None and hasattr(scaler, "forward"):
+			scaler.forward = types.MethodType(_safe_scaler_forward, scaler)
+			logger.info("Scaler patch: instance forward() overridden (safe, out-of-place).")
+		else:
+			logger.warning("Scaler patch: no scaler found to patch.")
 
+		
 		# - Freeze encoders?
 		self._freeze_encoders()
 
