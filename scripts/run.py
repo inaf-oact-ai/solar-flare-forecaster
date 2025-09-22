@@ -47,7 +47,7 @@ from transformers import EvalPrediction
 #import evaluate
 
 # - SFFORECASTER
-from sfforecaster.model import MultiHorizonVideoMAE, MoiraiForSequenceClassification
+from sfforecaster.model import MultiHorizonVideoMAE, MoiraiForSequenceClassification, ImageFeatTSClassifier
 from sfforecaster.utils import *
 from sfforecaster.dataset import get_target_maps
 from sfforecaster.dataset import VideoDataset, ImgDataset, ImgStackDataset, TSDataset
@@ -112,12 +112,15 @@ def get_args():
 	
 	# - Model options
 	parser.add_argument('-model', '--model', dest='model', required=False, type=str, default="google/siglip-so400m-patch14-384", action='store', help='Model pretrained file name or weight path to be loaded {google/siglip-large-patch16-256, google/siglip-base-patch16-256, google/siglip-base-patch16-256-i18n, google/siglip-so400m-patch14-384, google/siglip-base-patch16-224, MCG-NJU/videomae-base, MCG-NJU/videomae-large, OpenGVLab/VideoMAEv2-Large}')
-	parser.add_argument('-model_ts_backbone', '--model_ts_backbone', dest='model_ts_backbone', required=False, type=str, default="Salesforce/moirai-1.1-R-base", action='store', help='Model TS backbone name')
+	parser.add_argument('-model_ts_backbone', '--model_ts_backbone', dest='model_ts_backbone', required=False, type=str, default="Salesforce/moirai-2.0-R-small", action='store', help='Model TS backbone name')
 	
 	parser.add_argument('--vitloader', dest='vitloader', action='store_true', help='If enabled use ViTForImageClassification to load model otherwise AutoModelForImageClassification (default=false)')	
 	parser.set_defaults(vitloader=False)
 	
 	parser.add_argument("--data_modality", dest='data_modality', type=str, choices=["image", "video", "ts"], default="image", help="Data modality model used")
+	
+	parser.add_argument("--video_model", dest='video_model', type=str, choices=["videomae", "imgfeatts"], default="videomae", help="Video model used")
+	parser.add_argument('-proj_dim', '--proj_dim', dest='proj_dim', required=False, type=int, default=128, action='store',help='Size of linear projection layer in ImageFeatTSClassifier model (default=128)')
 	
 	parser.add_argument('--use_model_processor', dest='use_model_processor', action='store_true', help='Use model image processor in data collator (default=false)')	
 	parser.set_defaults(use_model_processor=False)
@@ -417,10 +420,8 @@ def load_image_model(
 		
 	return model, image_processor	
 	
-		
-
 			
-def load_video_model(
+def load_videomae_model(
 	args,
 	id2label,
 	label2id,
@@ -459,6 +460,73 @@ def load_video_model(
 
 	return model, image_processor
 		
+def load_imgfeatts_model(
+	args,
+	id2label,
+	label2id,
+	num_labels,
+	nclasses,
+	inference_mode=False
+):
+	""" Load img feat TS model & processor """
+		
+	num_out= (1 if args.binary else num_labels)
+	print("num_out")
+	print(num_out)
+	
+	model = ImageFeatTSClassifier(
+		image_model_name=args.model,
+		moirai_pretrained_name=args.model_ts_backbone,
+		num_labels=num_out,
+		proj_dim=args.proj_dim,
+		patching_mode=args.ts_patching_mode,
+		freeze_backbone=False,
+		freeze_img_backbone=args.freeze_backbone,
+		max_img_freeze_layer_id=args.max_freeze_layer_id,
+	)
+	
+	image_processor = model.image_processor
+	
+	# - Inference?
+	if inference_mode:
+		# ...
+		# ...
+		raise ValueError("TO BE IMPLEMENTED!!!")
+		
+	return model, image_processor
+		
+		
+def load_video_model(
+	args,
+	id2label,
+	label2id,
+	num_labels,
+	nclasses,
+	inference_mode=False
+):
+	""" Load video model & processor """
+	
+	if args.video_model=="videomae":
+		return load_videomae_model(
+			args=args,
+			id2label=id2label,
+			label2id=label2id,
+			num_labels=num_labels,
+			nclasses=nclasses,
+			inference_mode=inference_mode
+		)
+	elif args.video_model=="imgfeatts":
+		return load_imgfeatts_model(
+			args=args,
+			id2label=id2label,
+			label2id=label2id,
+			num_labels=num_labels,
+			nclasses=nclasses,
+			inference_mode=inference_mode
+		)
+	else:
+		raise ValueError("Invalid/unsupported video_model specified!")
+	
 	
 def load_ts_model(
 	args,
@@ -496,16 +564,7 @@ def load_ts_model(
 	print("--> model.config")
 	print(model.config)
 	print(model.config.to_json_string())
-	
-	
-	# - If binary, replace the final layer with 1-logit head
-	#if args.binary:
-	#	in_features = model.head[-1].in_features  # last Linear
-	#	model.head[-1] = torch.nn.Linear(in_features, 1)
-	#	model.config.num_labels = 1
-	#	if hasattr(model.config, "problem_type"): # avoid HF inferring wrong loss
-	#		model.config.problem_type = None
-            
+	         
 	# - Ordinal variant (NOT IMPLEMENTED)
 	if args.ordinal:
 		raise ValueError("Ordinal head not yet implemented for time series data!")
@@ -513,20 +572,13 @@ def load_ts_model(
   # - Inference?
 	if inference_mode:
 	  # - Load trained checkpoint (weights + config)
-		#state_path = resolve_state_dict_path(args.model)
-		#logger.info(f"Loading weights from path {state_path} (checkpoint={args.model}) ...")
-		
-		#state = torch.load(state_path, map_location="cpu")
-		# strict=False is handy if your binary/multiclass head shape differs
-		#model.load_state_dict(state, strict=True)        
-		#model.eval()
-		
 		ckpt = args.model  # can be a file OR a checkpoint dir
 		logger.info(f"Loading weights from path {args.model} ...")
 		state = load_state_dict_any(ckpt)
 		missing, unexpected = model.load_state_dict(state, strict=False)
 		if missing or unexpected:
 			print(f"[load_ts_model] load_state_dict -> missing: {missing[:6]} ... | unexpected: {unexpected[:6]} ...")
+		
 		model.eval()
 		
 	# - No processor needed for TS (your TSDataCollator handles it)
@@ -574,6 +626,8 @@ def freeze_model(model, args):
 		encoder_name= "encoder"
 		layer_search_pattern= "layer"
 		model_base= model.base_model
+		if args.video_model=="imgfeatts":
+			return model
 		
 	else: # Nothing to be done
 		encoder_name= "encoder"

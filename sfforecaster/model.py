@@ -11,6 +11,7 @@ import os
 import random
 import numpy as np
 from typing import Optional
+from contextlib import nullcontext
 
 # - TORCH
 import torch
@@ -20,8 +21,10 @@ from transformers import VideoMAEForVideoClassification
 from transformers import ViTForImageClassification
 from transformers.modeling_outputs import SequenceClassifierOutput
 from transformers.configuration_utils import PretrainedConfig
+from transformers import AutoModelForImageClassification
 
 # - MODULE
+from sfforecaster.utils import *
 from sfforecaster import logger
 
 # - Import Moirai2 if available, else Moirai1
@@ -36,7 +39,7 @@ except Exception:
 ###########################################
 ###     CORAL ORDINAL HEAD MODEL
 ###########################################
-class CoralOrdinalHead(nn.Module):
+class CoralOrdinalHead(torch.nn.Module):
 	"""
 		Structural ordinal head for K ordered classes.
 		Produces K-1 logits corresponding to [y>=class_1, ..., y>=class_{K-1}].
@@ -451,5 +454,385 @@ class MoiraiForSequenceClassification(torch.nn.Module):
 			self._dbg_done = True
 
 		logits = self.classifier(pooled)  # [B, num_labels]
+		return SequenceClassifierOutput(logits=logits)
+		
+###############################################
+###   IMAGE-TS HYBRID MODEL
+###############################################
+class GlobalFeatHead(torch.nn.Module):
+	"""
+		Takes whatever the backbone returns and produces a single vector [B, D] per image.
+		Handles common HF backbones (ViT, ConvNeXt, SigLIP vision towers, etc.).
+	"""
+	def __init__(self, expected_hidden_size: int | None = None):
+		super().__init__()
+		self.expected_hidden_size = expected_hidden_size
+		# Fallback global pooling for 4D features [B, C, H', W']
+		self.gap = nn.AdaptiveAvgPool2d((1, 1))
+
+	def forward(self, backbone_outputs):
+		"""
+			Accepts a ModelOutput, tuple, or Tensor.
+			Returns a 2D tensor [B, D].
+		"""
+		out = backbone_outputs
+
+		# Case 1: HF ModelOutput with attributes (e.g., ViT/ConvNeXt)
+		if hasattr(out, "pooler_output") and out.pooler_output is not None:
+			# [B, D]
+			return out.pooler_output
+
+		if hasattr(out, "last_hidden_state") and out.last_hidden_state is not None:
+			x = out.last_hidden_state  # [B, N, D]
+			# If there's a CLS token, it's typically at index 0; mean-pool is more stable across models.
+			# Mean over tokens (excluding CLS if you prefer: x[:, 1:, :].mean(dim=1))
+			return x.mean(dim=1)  # [B, D]
+
+		# Case 2: the backbone returned a raw Tensor
+		if isinstance(out, torch.Tensor):
+			if out.dim() == 4:
+				# [B, C, H, W] -> GAP -> [B, C]
+				x = self.gap(out).squeeze(-1).squeeze(-2)
+				return x
+			elif out.dim() == 3:
+				# [B, N, D] -> mean over tokens
+				return out.mean(dim=1)
+			elif out.dim() == 2:
+				# already [B, D]
+				return out
+			else:
+				raise ValueError(f"Unsupported tensor shape from backbone: {tuple(out.shape)}")
+
+		# Case 3: tuple/list
+		if isinstance(out, (tuple, list)) and len(out) > 0:
+			maybe_tensor = out[0]
+			if isinstance(maybe_tensor, torch.Tensor):
+				return self.forward(maybe_tensor)
+			# or recurse on a simple object that has attributes
+			maybe_obj = out[0]
+			if hasattr(maybe_obj, "last_hidden_state") or hasattr(maybe_obj, "pooler_output"):
+				return self.forward(maybe_obj)
+
+		raise ValueError("Unrecognized backbone output type; cannot extract a global feature vector.")
+
+
+class ImageEncoderWrapper(torch.nn.Module):
+	"""
+		Wraps a HF AutoModelForImageClassification to expose a pure-vision encoder that
+		returns per-image embeddings via GlobalFeatHead.
+	"""
+	def __init__(
+		self, 
+		model_name: str, 
+		freeze_backbone: bool = False, 
+		max_freeze_layer_id: int = -1, 
+		trust_remote_code: bool = True
+	):
+		super().__init__()
+		
+		# - Load entire model
+		self.full_model = AutoModelForImageClassification.from_pretrained(
+			model_name, trust_remote_code=trust_remote_code
+		)
+		
+		# - Load image processor
+		self.image_processor = AutoImageProcessor.from_pretrained(model_name)
+		
+		# - Retrieve encoder
+		self.encoder = self._extract_encoder(self.full_model)
+		
+		# - Freeze encoder layers?
+		if freeze_backbone:
+			encoder_name= "vision_model.encoder"
+			layer_search_pattern= "layers"
+
+			for name, param in self.encoder.named_parameters():	
+				if name.startswith(encoder_name):
+					layer_index= extract_layer_id(name, layer_search_pattern)
+					if max_freeze_layer_id==-1 or (max_freeze_layer_id>=0 and layer_index!=-1 and layer_index<max_freeze_layer_id):
+						param.requires_grad = False
+		
+		self.feat_head = GlobalFeatHead()
+
+	@staticmethod
+	def _extract_encoder(model: torch.nn.Module) -> torch.nn.Module:
+		"""
+			Attempts to pull the vision backbone from common fields.
+			Falls back to model.base_model if available, or the whole model as last resort.
+		"""
+		# Prefer an explicitly named vision tower if present
+		for attr in ["vision_model", "base_model", "vit", "convnext", "backbone"]:
+			enc = getattr(model, attr, None)
+			if isinstance(enc, torch.nn.Module):
+				return enc
+        
+		# Some implementations put the encoder as model.<classifier>.backbone etc.
+		# Last resort: if the model exposes 'model' inside (common in timm-wrapped heads)
+		inner = getattr(model, "model", None)
+		if isinstance(inner, torch.nn.Module):
+			return inner
+		
+		# As a final fallback, use the full model (it should still accept pixel_values)
+		return model
+
+	def forward(self, pixel_values: torch.Tensor) -> torch.Tensor:
+		"""
+			pixel_values: [B, C, H, W]
+			returns: per-image feature vectors [B, D]
+		"""
+		# Many HF encoders expect 'pixel_values' kwarg
+		outputs = self.encoder(pixel_values=pixel_values)
+		feats = self.feat_head(outputs)  # [B, D]
+		return feats
+		
+class ImageFeatTSClassifier(torch.nn.Module):
+	"""
+		Frames [B,T,C,H,W] -> per-frame embed [B,T,D] -> proj K -> [B,T,K]
+		-> build Moirai batch (target/observed_mask/ids) -> Moirai backbone -> logits [B,num_labels].
+	"""
+	def __init__(
+		self,
+		image_model_name: str,
+		moirai_pretrained_name: str = "Salesforce/moirai-2.0-R-small",
+		num_labels: int = 4,
+		proj_dim: int = 128,
+		patching_mode: str = "time_variate",  # "time_only" | "time_variate"
+		freeze_backbone: bool = False,
+		freeze_img_backbone: bool = False,
+		max_img_freeze_layer_id: int = -1,
+		trust_remote_code: bool = True,
+		layernorm_eps: float = 1e-6,
+	):
+		super().__init__()
+		assert patching_mode in ("time_only", "time_variate")
+		if _M is None:
+			raise RuntimeError("uni2ts not available; cannot build Moirai backbone.")
+
+		# Create image encoder (as in your code)
+		self.image_enc= ImageEncoderWrapper(
+			image_model_name, 
+			freeze_backbone=freeze_img_backbone,
+			max_freeze_layer_id=max_img_freeze_layer_id,
+			trust_remote_code=trust_remote_code
+		)
+		
+		self.image_processor= self.image_enc.image_processor
+		
+		# per-timestep projection -> K
+		self._proj = None          # lazy nn.Linear(D, proj_dim) once we see D
+		self._proj_dim = proj_dim
+		self.ln = torch.nn.LayerNorm(proj_dim, eps=layernorm_eps)
+
+		# moirai backbone + logits head (lazy)
+		self.freeze_backbone = freeze_backbone
+		self.backbone = _M.from_pretrained(moirai_pretrained_name)
+		self.patching_mode = patching_mode
+		self.classifier = None
+		self.num_labels = num_labels
+
+		# (optional) coax repr outputs
+		for attr in ("return_repr", "output_hidden_states", "return_hidden"):
+			if hasattr(self.backbone, attr):
+				try: setattr(self.backbone, attr, True)
+				except Exception: pass
+
+		self._last_repr = None
+		self._hooked = self._register_hook_on_any(["transformer","encoder","backbone","model","net"])
+
+		# HF-ish config for downstream code that looks at num_labels
+		from transformers.configuration_utils import PretrainedConfig
+		class _Cfg(PretrainedConfig): pass
+		self.config = _Cfg(num_labels=num_labels)
+
+	def _register_hook_on_any(self, names):
+		for name in names:
+    	mod = getattr(self.backbone, name, None)
+			if mod is None:
+				continue
+			try:
+				def _hook(module, inp, out):
+					val = None
+					if isinstance(out, (list, tuple)) and len(out) > 0:
+						val = out[0]
+					elif isinstance(out, dict):
+						val = out.get("reprs", None) or out.get("hidden_states", None) or out.get("x", None)
+					else:
+						val = out
+					if isinstance(val, torch.Tensor):
+						self._last_repr = val
+				mod.register_forward_hook(_hook)
+				return True
+			except Exception:
+				continue
+		return False
+
+	def _get_reprs(self, out):
+		if isinstance(self._last_repr, torch.Tensor):
+			return self._last_repr
+		if isinstance(out, dict):
+			for k in ("reprs","hidden_states","x","last_hidden_state"):
+				if k in out and isinstance(out[k], torch.Tensor):
+					return out[k]
+		if isinstance(out, (list, tuple)) and out and isinstance(out[0], torch.Tensor):
+			return out[0]
+		if isinstance(out, torch.Tensor):
+			return out
+		raise RuntimeError("Could not retrieve Moirai representations.")
+
+	def _maybe_init_projection(self, feat_dim: int):
+		if self._proj is None:
+			self._proj = torch.nn.Linear(feat_dim, self._proj_dim)
+
+	def _frames_to_feats(self, frames: torch.Tensor) -> torch.Tensor:
+		"""frames: [B,T,C,H,W] -> per-frame feats: [B,T,D] (then project->K and LN)"""
+		B, T, C, H, W = frames.shape
+		feats_per_t = []
+		ctx = torch.no_grad() if self.freeze_backbone else nullcontext()
+		with ctx:
+			for t in range(T):
+				f_t = self.image_enc(frames[:, t, ...])  # [B, D]
+				feats_per_t.append(f_t)
+		x = torch.stack(feats_per_t, dim=1)             # [B, T, D]
+		D = x.size(-1)
+		self._maybe_init_projection(D)
+		x = self._proj(x)                               # [B, T, K]
+		x = self.ln(x)                                  # [B, T, K]
+		return x
+
+	def _pack_for_moirai(self, X: torch.Tensor):
+		"""
+			X: [B, L, C]  values; builds observed_mask=1, ids, and patchifies exactly like your Moirai wrapper.
+		"""
+		B, L, C = X.shape
+		device, dtype = X.device, X.dtype
+
+		# observed mask = ones
+		obs = torch.ones(B, L, C, dtype=torch.bool, device=device)
+
+		# read Moirai expected in_features = in_proj.hidden_layer.in_features
+		patch_size = getattr(self.backbone, "patch_size", 16)
+		in_proj = getattr(self.backbone, "in_proj", None)
+		if in_proj is None or not hasattr(in_proj, "hidden_layer"):
+			raise RuntimeError("Backbone has no in_proj.hidden_layer; cannot infer expected input width.")
+		Wexp = in_proj.hidden_layer.in_features
+
+		# values+mask concatenation factor used by ts_embed in uni2ts
+		concat_factor = 2
+		Creq = Wexp // (concat_factor * patch_size)     # usually 1 for Moirai2-small
+
+		# channel handling per patching mode (same logic as your MoiraiForSequenceClassification)
+		if self.patching_mode == "time_only":
+			if C < Creq:
+				pad = torch.zeros(B, L, Creq - C, dtype=dtype, device=device)
+				X   = torch.cat([X, pad], dim=-1)
+				obs = torch.cat([obs, torch.zeros_like(pad, dtype=torch.bool)], dim=-1)
+			elif C > Creq:
+				logger.warning(f"Truncating variates from C={C} to {Creq} for time_only patching.")
+				X   = X[..., :Creq]
+				obs = obs[..., :Creq]
+            
+			# patchify along time
+			Lp = (L // patch_size) * patch_size
+			if Lp == 0:
+				raise RuntimeError(f"Sequence too short for patch_size={patch_size}.")
+			if Lp != L:
+				X   = X[:, :Lp, :]
+				obs = obs[:, :Lp, :]
+            
+			Ltok = Lp // patch_size
+			x_tok   = X.view(B, Ltok, patch_size * Creq)
+			obs_tok = obs.view(B, Ltok, patch_size * Creq)
+			N = Ltok
+			time_id    = torch.arange(Ltok, device=device).view(1, -1).expand(B, Ltok)
+			sample_id  = torch.arange(B,    device=device).view(-1, 1).expand(B, Ltok)
+			variate_id = torch.zeros(B, Ltok, dtype=torch.long, device=device)
+
+		else:  # "time_variate" → per-variate tokens
+			if Creq != 1 and not hasattr(self, "_warned_creq"):
+				logger.warning(f"time_variate expects Creq=1; got Creq={Creq}. Proceeding.")
+				self._warned_creq = True
+			
+			Lp = (L // patch_size) * patch_size
+			if Lp == 0:
+				raise RuntimeError(f"Sequence too short for patch_size={patch_size}.")
+				
+			if Lp != L:
+				X   = X[:, :Lp, :]
+				obs = obs[:, :Lp, :]
+            
+			Ltok = Lp // patch_size
+			# [B,L, C] → [B, L', ps, C] → [B, C, L', ps] → [B, C*L', ps*Creq]
+			x_blk   = X.view(B, Ltok, patch_size, C).permute(0, 3, 1, 2).contiguous()
+			obs_blk = obs.view(B, Ltok, patch_size, C).permute(0, 3, 1, 2).contiguous()
+			x_tok   = x_blk.view(B, C * Ltok, patch_size * Creq)
+			obs_tok = obs_blk.view(B, C * Ltok, patch_size * Creq)
+			N = C * Ltok
+			time_row   = torch.arange(Ltok, device=device).repeat(C)
+			var_row    = torch.arange(C, device=device).repeat_interleave(Ltok)
+			time_id    = time_row.view(1, -1).expand(B, N)
+			variate_id = var_row.view(1, -1).expand(B, N).long()
+			sample_id  = torch.arange(B, device=device).view(-1, 1).expand(B, N)
+
+		prediction_mask = torch.zeros(B, N, dtype=torch.bool, device=device)
+
+		return {
+			"target": x_tok,                # [B, N, patch_size*Creq]
+			"observed_mask": obs_tok,       # [B, N, patch_size*Creq] (bool)
+			"sample_id": sample_id,         # [B, N]
+			"time_id": time_id,             # [B, N]
+			"variate_id": variate_id,       # [B, N]
+			"prediction_mask": prediction_mask,  # [B, N]
+		}
+
+	def forward(self, pixel_values: torch.Tensor, extra_ts: torch.Tensor | None = None, labels=None):
+		"""
+			pixel_values: [B,T,C,H,W]
+			extra_ts: optional extra covariates [B, C_extra, T] to concat on channels (time aligned)
+		"""
+
+		# 1) frames -> [B,T,K]
+		feat_seq = self._frames_to_feats(pixel_values)         # [B, T, K]
+        
+		# 2) concat extra covariates on channel axis (→ [B,T,K+C_extra])
+		if extra_ts is not None:
+			if extra_ts.size(-1) != feat_seq.size(1):
+				raise ValueError(f"extra_ts T={extra_ts.size(-1)} != frames T={feat_seq.size(1)}")
+			# extra_ts is [B, C_extra, T] → [B, T, C_extra]
+			extra_seq = extra_ts.transpose(1, 2).contiguous()
+			feat_seq = torch.cat([feat_seq, extra_seq], dim=-1)  # [B, T, K+C_extra]
+
+		# 3) pack for Moirai (build target/observed_mask/ids and patchify)
+		packed = self._pack_for_moirai(feat_seq)               # dict of tensors on same device
+
+		# 4) call backbone
+		out = self.backbone(
+			packed["target"],
+			packed["observed_mask"],
+			packed["sample_id"],
+			packed["time_id"],
+			packed["variate_id"],
+			packed["prediction_mask"],
+			True,
+		)
+
+		reprs = self._get_reprs(out)                            # [B, N, D] or [B*N, D]
+		if reprs.dim() == 2:
+			B, N = packed["sample_id"].shape
+			reprs = reprs.view(B, N, -1)
+
+		# 5) masked mean over tokens (valid = observed & not prediction)
+		obs_tok = packed["observed_mask"]
+		valid_obs = obs_tok.any(dim=-1) if obs_tok.dim() == 3 else obs_tok
+		valid = valid_obs & (~packed["prediction_mask"])
+		weights = valid.float()
+		den = weights.sum(dim=1, keepdim=True).clamp_min(1.0)
+		pooled = (reprs * weights.unsqueeze(-1)).sum(dim=1) / den   # [B, D_repr]
+
+		# 6) lazy classifier
+		if (self.classifier is None) or (self.classifier.in_features != pooled.size(-1)):
+			self.classifier = torch.nn.Linear(pooled.size(-1), self.num_labels).to(pooled.device)
+
+		logits = self.classifier(pooled)                         # [B, num_labels]
+		
 		return SequenceClassifierOutput(logits=logits)
 		
