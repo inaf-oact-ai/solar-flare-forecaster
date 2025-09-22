@@ -540,19 +540,25 @@ class ImageEncoderWrapper(torch.nn.Module):
 		
 		# - Retrieve encoder
 		self.encoder = self._extract_encoder(self.full_model)
+		self.freeze_backbone= freeze_backbone
+		self.max_freeze_layer_id= max_freeze_layer_id
 		
-		# - Freeze encoder layers?
-		if freeze_backbone:
-			encoder_name= "vision_model.encoder"
-			layer_search_pattern= "layers"
-
-			for name, param in self.encoder.named_parameters():	
-				if name.startswith(encoder_name):
-					layer_index= extract_layer_id(name, layer_search_pattern)
-					if max_freeze_layer_id==-1 or (max_freeze_layer_id>=0 and layer_index!=-1 and layer_index<max_freeze_layer_id):
-						param.requires_grad = False
-		
+		# - Create head
 		self.feat_head = GlobalFeatHead()
+
+
+	def _freeze_encoder(self):
+		""" Freeze encoder """
+
+		encoder_name= "vision_model.encoder"
+		layer_search_pattern= "layers"
+
+		for name, param in self.encoder.named_parameters():
+			print(f"--> name={name}")
+			if name.startswith(encoder_name):
+				layer_index= extract_layer_id(name, layer_search_pattern)
+				if self.max_freeze_layer_id==-1 or (self.max_freeze_layer_id>=0 and layer_index!=-1 and layer_index<self.max_freeze_layer_id):
+					param.requires_grad = False
 
 	@staticmethod
 	def _extract_encoder(model: torch.nn.Module) -> torch.nn.Module:
@@ -610,12 +616,13 @@ class ImageFeatTSClassifier(torch.nn.Module):
 
 		# Create image encoder (as in your code)
 		self.image_enc= ImageEncoderWrapper(
-			image_model_name, 
+			image_model_name,
 			freeze_backbone=freeze_img_backbone,
-			max_freeze_layer_id=max_img_freeze_layer_id,
+			max_img_freeze_layer_id=max_img_freeze_layer_id,
 			trust_remote_code=trust_remote_code
 		)
-		
+		self.freeze_img_backbone= freeze_img_backbone
+		self.max_img_freeze_layer_id= max_img_freeze_layer_id
 		self.image_processor= self.image_enc.image_processor
 		
 		# per-timestep projection -> K
@@ -636,6 +643,9 @@ class ImageFeatTSClassifier(torch.nn.Module):
 		self.classifier = None
 		self.num_labels = num_labels
 
+		# - Freeze encoders?
+		self._freeze_encoders()
+
 		# (optional) coax repr outputs
 		for attr in ("return_repr", "output_hidden_states", "return_hidden"):
 			if hasattr(self.backbone, attr):
@@ -649,6 +659,21 @@ class ImageFeatTSClassifier(torch.nn.Module):
 		from transformers.configuration_utils import PretrainedConfig
 		class _Cfg(PretrainedConfig): pass
 		self.config = _Cfg(num_labels=num_labels)
+
+
+	def _freeze_encoders(self):
+		""" Freeze model components (img backbone, moirai backbone) """ 
+
+		# - Freeze image encoder layers?
+		if self.freeze_img_backbone:
+			logger.info("Freezing image encoder ...")
+			self.image_enc.freeze_encoder()
+						
+		# - Freeze Moirai encoder layers
+		if self.freeze_backbone:
+			logger.info("Freezing Moirai encoder ...")
+			for p in self.backbone.parameters():
+				p.requires_grad = False
 
 	@property
 	def device(self):
@@ -700,7 +725,7 @@ class ImageFeatTSClassifier(torch.nn.Module):
 
 	def _maybe_init_projection(self, feat_dim: int, device: torch.device, dtype: torch.dtype):
 		if self._proj is None:
-			self._proj = nn.Linear(feat_dim, self._proj_dim)
+			self._proj = torch.nn.Linear(feat_dim, self._proj_dim)
 		# ensure it’s on the same device/dtype as inputs
 		self._proj.to(device=device, dtype=dtype)
 	
