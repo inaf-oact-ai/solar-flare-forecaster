@@ -650,6 +650,7 @@ class ImageFeatTSClassifier(torch.nn.Module):
 			return next(self.parameters()).device
 		except StopIteration:
 			# model with no params yet
+			logger.warning("Model without params yet, setting torch.device to CPU ...")
 			return torch.device("cpu")
 
 	def _register_hook_on_any(self, names):

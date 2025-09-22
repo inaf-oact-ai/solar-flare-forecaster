@@ -824,6 +824,9 @@ class CustomTrainer(Trainer):
 		#print(self.is_binary_single_logit)
 		#print(getattr(self.model.config, "num_labels", None))
 		#print(self.logitout_size)
+		
+		#dev= self.model.device
+		dev = next(self.model.parameters()).device
 
 		# - Build the loss criterion
 		if self.multilabel:
@@ -831,11 +834,11 @@ class CustomTrainer(Trainer):
 			##  MULTI-LABEL
 			#########################
 			if self.loss_type == "ce":
-				pos_w = self.class_weights.to(self.model.device) if self.class_weights is not None else None
+				pos_w = self.class_weights.to(dev) if self.class_weights is not None else None
 				self.loss_fct = torch.nn.BCEWithLogitsLoss(pos_weight=pos_w)
 				
 			elif self.loss_type == "focal":
-				pos_w = self.class_weights.to(self.model.device) if self.class_weights is not None else None
+				pos_w = self.class_weights.to(dev) if self.class_weights is not None else None
 				self.loss_fct = FocalLossMultiLabel(gamma=self.focal_gamma, pos_weight=pos_w, reduction="mean")
 			
 			else:
@@ -845,7 +848,7 @@ class CustomTrainer(Trainer):
 			#########################
 			##  ORDINAL
 			#########################
-			pos_w = self.ordinal_pos_weights.to(self.model.device) if self.ordinal_pos_weights is not None else None
+			pos_w = self.ordinal_pos_weights.to(dev) if self.ordinal_pos_weights is not None else None
 			
 			if self.loss_type == "ce":
 				# BCEWithLogitsLoss with per-threshold pos_weight
@@ -872,27 +875,27 @@ class CustomTrainer(Trainer):
 			##  SINGLE-LABEL
 			#########################
 			if self.loss_type == "ce":
-				#w = self.class_weights.to(self.model.device) if self.class_weights is not None else None
+				#w = self.class_weights.to(dev) if self.class_weights is not None else None
 				#self.loss_fct = torch.nn.CrossEntropyLoss(weight=w)
 		
 				if self.is_binary_single_logit:
 					# BCE for single-logit binary
-					pos_w = (self.binary_pos_weights.to(self.model.device) if self.binary_pos_weights is not None else None)
+					pos_w = (self.binary_pos_weights.to(dev) if self.binary_pos_weights is not None else None)
 					self.loss_fct = torch.nn.BCEWithLogitsLoss(pos_weight=pos_w)
 				else:
-					w = self.class_weights.to(self.model.device) if self.class_weights is not None else None
+					w = self.class_weights.to(dev) if self.class_weights is not None else None
 					self.loss_fct = torch.nn.CrossEntropyLoss(weight=w)	
 				
 		
 			elif self.loss_type == "focal":
 				#alpha = self.focal_alpha
 				#if isinstance(alpha, torch.Tensor):
-				#	alpha = alpha.to(self.model.device)
+				#	alpha = alpha.to(dev)
 				#self.loss_fct = FocalLossMultiClass(alpha=alpha, gamma=self.focal_gamma, reduction="mean")
 				
 				if self.is_binary_single_logit:
 					# Use BCE-style focal via multilabel focal (C=1)
-					pos_w = (self.binary_pos_weights.to(self.model.device) if self.binary_pos_weights is not None else None)
+					pos_w = (self.binary_pos_weights.to(dev) if self.binary_pos_weights is not None else None)
 					self.loss_fct = FocalLossMultiLabel(
 						gamma=self.focal_gamma,
 						pos_weight=pos_w,      # class tilt for positives
@@ -901,7 +904,7 @@ class CustomTrainer(Trainer):
 				else:
 					alpha = self.focal_alpha
 					if isinstance(alpha, torch.Tensor):
-						alpha = alpha.to(self.model.device)
+						alpha = alpha.to(dev)
 					self.loss_fct = FocalLossMultiClass(alpha=alpha, gamma=self.focal_gamma, reduction="mean")
 				
 			elif self.loss_type == "sol":
@@ -1144,11 +1147,11 @@ class CustomTrainer(Trainer):
 		# Log via Trainer's logger (goes to W&B if report_to includes "wandb")
 		self.log(metrics)
 		
-	def _compute_pos_weight_from_ce_weights(self):
-		if self.class_weights is None or self.class_weights.numel() < 2:
-			return None
-		w_neg, w_pos = self.class_weights[0].to(self.model.device), self.class_weights[1].to(self.model.device)
-		return (w_pos / (w_neg + 1e-12))	
+	#def _compute_pos_weight_from_ce_weights(self):
+	#	if self.class_weights is None or self.class_weights.numel() < 2:
+	#		return None
+	#	w_neg, w_pos = self.class_weights[0].to(self.model.device), self.class_weights[1].to(self.model.device)
+	#	return (w_pos / (w_neg + 1e-12))	
 		
 	
 class CustomTrainerTS(CustomTrainer):
