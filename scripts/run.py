@@ -155,6 +155,8 @@ def get_args():
 	# - Model training options
 	parser.add_argument('--run_eval_on_start', dest='run_eval_on_start', action='store_true',help='Run model evaluation on start for debug (default=false)')	
 	parser.set_defaults(run_eval_on_start=False)
+	parser.add_argument('--run_eval_on_start_manual', dest='run_eval_on_start_manual', action='store_true',help='Run model evaluation on start for debug (default=false)')	
+	parser.set_defaults(run_eval_on_start_manual=False)
 	parser.add_argument('-logging_steps', '--logging_steps', dest='logging_steps', required=False, type=int, default=1, action='store',help='NUmber of logging steps (default=1)')
 	parser.add_argument('--run_eval_on_step', dest='run_eval_on_step', action='store_true',help='Run model evaluation after each step (default=false)')	
 	parser.set_defaults(run_eval_on_step=False)
@@ -1207,9 +1209,10 @@ def run_train(
 	################
 	##  DEBUG
 	#################
-	#print("compute_metrics is None? ->", trainer.compute_metrics is None)
-	#metrics = trainer.evaluate()  # triggers evaluation once
-	#print("eval metrics keys ->", list(metrics.keys()))
+	if args.run_eval_on_start_manual:
+		print("compute_metrics is None? ->", trainer.compute_metrics is None)
+		metrics = trainer.evaluate()  # triggers evaluation once
+		print("eval metrics keys ->", list(metrics.keys()))
 	#################		
 			
 	# - Run train	
@@ -1574,7 +1577,8 @@ def main():
 		TrainerClass = CustomTrainerTS
 	elif args.data_modality == "video":
 		if args.video_model=="imgfeatts":
-			TrainerClass = CustomTrainerTS
+			#TrainerClass = CustomTrainerTS
+			TrainerClass = CustomTrainer
 		else:
 			TrainerClass = CustomTrainer
 	else:
