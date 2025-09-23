@@ -531,8 +531,15 @@ class ImageEncoderWrapper(torch.nn.Module):
 	):
 		super().__init__()
 		
+		# - Set options
+		self.freeze_backbone= freeze_backbone
+		self.max_freeze_layer_id= max_freeze_layer_id
+		
 		# - Load entire model
-		self.full_model = AutoModelForImageClassification.from_pretrained(
+		#self.full_model = AutoModelForImageClassification.from_pretrained(
+		#	model_name, trust_remote_code=trust_remote_code
+		#)
+		_fm = AutoModelForImageClassification.from_pretrained(
 			model_name, trust_remote_code=trust_remote_code
 		)
 		
@@ -540,12 +547,18 @@ class ImageEncoderWrapper(torch.nn.Module):
 		self.image_processor = AutoImageProcessor.from_pretrained(model_name)
 		
 		# - Retrieve encoder
-		self.encoder = self._extract_encoder(self.full_model)
-		self.freeze_backbone= freeze_backbone
-		self.max_freeze_layer_id= max_freeze_layer_id
-		
+		#self.encoder = self._extract_encoder(self.full_model)
+		self.encoder = self._extract_encoder(_fm)
+
 		# - Create head
 		self.feat_head = GlobalFeatHead()
+
+		# IMPORTANT: do NOT keep a registered reference to the full model,
+		# or you’ll have duplicate parameters under two names.
+		# If you want to remember which checkpoint we used, store only metadata:
+		self._orig_image_model_name = model_name
+		# drop the local variable so it doesn’t get attached anywhere
+		del _fm
 
 
 	def _freeze_encoder(self):
