@@ -189,7 +189,7 @@ def to_np(x, dtype=None):
 	x = np.asarray(x)
 	if dtype is not None:
 		x = x.astype(dtype)
-	return x
+	return x 
     	
 def as_numpy_int64(x):
 	if isinstance(x, torch.Tensor):

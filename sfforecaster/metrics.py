@@ -362,6 +362,43 @@ def safe_key(name):
 	# turn labels like "C+" / "M+" into log-safe keys: "C_" / "M_"
 	return re.sub(r"[^A-Za-z0-9_]+", "_", str(name))
     
+#def hkss_from_counts(TP, FP, TN, FN, eps=1e-12):
+#	""" Compute Hanssen & Kuipers’ Discriminant (H&KSS) from counts """
+#	TP, FP, TN, FN = map(float, (TP, FP, TN, FN))
+#	pod = TP / max(TP + FN, eps)          # probability of detection
+#	far = FP / max(FP + TN, eps)          # false alarm rate
+#	return pod - far                      # H&KSS (a.k.a. TSS)    
+    
+def apss_from_counts(TP, FP, TN, FN, eps=1e-12):
+	""" Compute Appleman’s Skill Score (ApSS) from counts """
+	TP, FP, TN, FN = map(float, (TP, FP, TN, FN))
+	N = TP + FP + TN + FN
+	A_forecast = (TP + TN) / max(N, eps)
+	frac_event = (TP + FN) / max(N, eps)
+	frac_nonevent = (FP + TN) / max(N, eps)
+	# Unskilled predictor = always predict majority class
+	A_reference = frac_nonevent if frac_event < frac_nonevent else frac_event
+	denom = max(1.0 - A_reference, eps)
+	score= (A_forecast - A_reference) / denom
+	return score
+	
+def bss_from_prob(probs, labels, eps=1e-12):
+	"""
+		probs: array-like of predicted probabilities in [0,1]
+		labels: array-like of 0/1 outcomes (same length)
+	"""
+	p = to_np(probs).astype(np.float64)
+	o = to_np(labels).astype(np.float64)
+	mse = np.mean((p - o)**2)
+	o_bar = np.mean(o)
+	#mse_ref = o_bar * (1.0 - o_bar) # from variance of a Bernoulli variable with mean o_bar
+	mse_ref = np.mean((o_bar - o)**2)
+	# If o_bar is 0 or 1, climatology has zero variance → define BSS=0 unless mse==0 (perfect)
+	if mse_ref < eps:
+		return 1.0 if mse < eps else 0.0
+	score= 1.0 - (mse / mse_ref)	
+	return score
+    
 ###########################################
 ##   MULTI-LABEL CLASS METRICS
 ###########################################
@@ -621,7 +658,7 @@ def single_label_metrics(predictions, labels, target_names=None, chunk_size=64, 
 	logits_np = predictions 
 	labels_np = y_true
 	sol_loss_mean_of_batches= chunked_mean_sol_loss(logits_np, labels_np, chunk=chunk_size)
-	
+		
 	# - Return as dictionary
 	metrics = {
 		'class_names': class_names,
@@ -718,12 +755,22 @@ def single_label_metrics(predictions, labels, target_names=None, chunk_size=64, 
 		# names in the same order used to build the confusion matrix
 		#name_neg = class_names[0]
 		#name_pos = class_names[1]
+		
+		# - ApSS from confusion counts
+		apss = apss_from_counts(TP, FP, TN, FN)
+
+		# BSS from probabilities (use P(positive) and 0/1 outcomes)
+		p_pos = probs[:, 1].numpy()  # assumes index 1 is the positive class
+		y_pos = (y_true == label_indices[1]).astype(int)
+		bss  = bss_from_prob(p_pos, y_pos)
 	
 		metrics.update({
 			"f1_neg": float(f1_neg),
 			"f1_pos": float(f1_pos),
 			"tss_neg": float(tss_neg),
 			"tss_pos": float(tss_pos),
+			"apss": float(apss),
+			"bss": float(bss),
 		})
 	
 	print("--> metrics")
@@ -801,7 +848,16 @@ def build_single_label_metrics(target_names, chunk_size, compute_best_tss):
 					"tss_neg": float(metrics["tss_neg"]),
 					"tss_pos": float(metrics["tss_pos"]),
 				}
-			)	
+			)
+			
+		# - Check if binary APSS/BSS
+		if "apss" in metrics:
+			metrics_scalar.update(
+				{
+					"apss": float(metrics["apss"]),
+					"bss": float(metrics["bss"]),
+				}
+			)
 			
 		# - Check if TSS expected metrics are present
 		if "tss_exp_avg" in metrics:
