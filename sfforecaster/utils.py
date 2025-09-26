@@ -271,13 +271,13 @@ def find_head_modules(model: torch.nn.Module):
 	"""Return a dict {name: module} for likely classification heads."""
 	heads = {}
 	for name, module in model.named_modules():
-		if HEAD_NAME_RE.search(name) and isinstance(module, (nn.Linear, nn.Conv1d, nn.Conv2d, nn.Conv3d)):
+		if HEAD_NAME_RE.search(name) and isinstance(module, (torch.nn.Linear, torch.nn.Conv1d, torch.nn.Conv2d, torch.nn.Conv3d)):
 			heads[name] = module
 	# Fallback: if nothing matched, try last Linear in the model
 	if not heads:
 		last_linear = None
 		for name, module in model.named_modules():
-			if isinstance(module, nn.Linear):
+			if isinstance(module, torch.nn.Linear):
 				last_linear = (name, module)
 		if last_linear:
 			heads = {last_linear[0]: last_linear[1]}
@@ -335,15 +335,15 @@ def check_head_initialization(model: torch.nn.Module, abs_max_warn=10.0, std_war
 def safe_reinit_head(model: torch.nn.Module):
 	""" Reinitialize model head """
 	for name, mod in find_head_modules(model).items():
-		if isinstance(mod, nn.Linear):
-			nn.init.xavier_uniform_(mod.weight)
+		if isinstance(mod, torch.nn.Linear):
+			torch.nn.init.xavier_uniform_(mod.weight)
 			if mod.bias is not None:
-				nn.init.zeros_(mod.bias)
+				torch.nn.init.zeros_(mod.bias)
 			print(f"Re-initialized Linear head: {name}")
-		elif isinstance(mod, (nn.Conv1d, nn.Conv2d, nn.Conv3d)):
-			nn.init.kaiming_normal_(mod.weight, nonlinearity="linear")
+		elif isinstance(mod, (torch.nn.Conv1d, torch.nn.Conv2d, torch.nn.Conv3d)):
+			torch.nn.init.kaiming_normal_(mod.weight, nonlinearity="linear")
 			if mod.bias is not None:
-				nn.init.zeros_(mod.bias)
+				torch.nn.init.zeros_(mod.bias)
 			print(f"Re-initialized Conv head: {name}")
 
 ##########################
