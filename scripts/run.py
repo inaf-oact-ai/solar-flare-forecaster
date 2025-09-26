@@ -711,10 +711,12 @@ def load_video_transform(args, image_processor):
 		transf_list.append(crop_aug)
 		
 	transf_list.extend(
-		VideoResize(size, interpolation=T.InterpolationMode.BICUBIC),
-		VideoFlipping(),
-		VideoRotate90(),
-		VideoNormalize(mean=mean, std=std)
+		[
+			VideoResize(size, interpolation=T.InterpolationMode.BICUBIC),
+			VideoFlipping(),
+			VideoRotate90(),
+			VideoNormalize(mean=mean, std=std)
+		]
 	)
 
 	#transform_train= T.Compose([
@@ -771,11 +773,13 @@ def load_image_transform(args, image_processor):
 		transf_list.append(crop_aug)
 		
 	transf_list.extend(
-		T.Resize(size, interpolation=T.InterpolationMode.BICUBIC),
-		FlippingTransform(),
-		Rotate90Transform(),
-		#T.ToTensor(),
-		T.Normalize(mean=mean, std=std),
+		[
+			T.Resize(size, interpolation=T.InterpolationMode.BICUBIC),
+			FlippingTransform(),
+			Rotate90Transform(),
+			#T.ToTensor(),
+			T.Normalize(mean=mean, std=std),
+		]
 	)
 
 	transform_train = T.Compose(transf_list)
