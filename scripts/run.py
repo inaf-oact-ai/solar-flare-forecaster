@@ -105,6 +105,10 @@ def get_args():
 	parser.add_argument('--resize', dest='resize', action='store_true', help='Resize input image before model processor. If false the model processor will resize anyway to its image size (default=false)')	
 	parser.set_defaults(resize=False)
 	parser.add_argument('-resize_size', '--resize_size', dest='resize_size', required=False, type=int, default=224, action='store', help='Resize size in pixels used if --resize option is enabled (default=224)')	
+	parser.add_argument('--add_crop_augm', dest='add_crop_augm', action='store_true', help='If enabled, add crop and resize augmentation in training (default=false)')	
+	parser.set_defaults(add_crop_augm=False)
+	parser.add_argument('-min_crop_fract', '--min_crop_fract', dest='min_crop_fract', required=False, type=float, default=0.65, action='store', help='Mininum crop fraction (default=0.65).')
+	
 	
 	parser.add_argument('-ts_logstretchs', '--ts_logstretchs', dest='ts_logstretchs', required=False, type=str, default='0,0', action='store', help='Log stretch TS vars separated by commas (1=enable, 0=disable). Must have same dimension of ts_vars.')	
 	parser.add_argument('-ts_vars', '--ts_vars', dest='ts_vars', required=False, type=str, default='xrs_flux_ratio,flare_hist', action='store', help='Resize size in pixels used if --resize option is enabled (default=224)')
@@ -700,13 +704,27 @@ def load_video_transform(args, image_processor):
 	ksize= 3.3 * sigma_max
 	kernel_size= int(max(ksize, 5)) # in imgaug kernel_size viene calcolato automaticamente dalla sigma così, ma forse si può semplificare a 3x3
 	#blur_aug= T.GaussianBlur(kernel_size, sigma=(sigma_min, sigma_max))
+	crop_aug= VideoRandomCenterCrop(min_frac=args.min_crop_fract, max_frac=1.0, output_size=None, channels_first_time_dim=True)
 
-	transform_train= T.Compose([
+	transf_list= []
+	if args.add_crop_augm:
+		transf_list.append(crop_aug)
+		
+	transf_list.extend(
 		VideoResize(size, interpolation=T.InterpolationMode.BICUBIC),
 		VideoFlipping(),
 		VideoRotate90(),
-		VideoNormalize(mean=mean, std=std),
-	])
+		VideoNormalize(mean=mean, std=std)
+	)
+
+	#transform_train= T.Compose([
+	#	VideoResize(size, interpolation=T.InterpolationMode.BICUBIC),
+	#	VideoFlipping(),
+	#	VideoRotate90(),
+	#	VideoNormalize(mean=mean, std=std),
+	#])
+		
+	transform_train= T.Compose(transf_list)
 		
 	transform= T.Compose([
 		VideoResize(size, interpolation=T.InterpolationMode.BICUBIC),
@@ -745,17 +763,32 @@ def load_image_transform(args, image_processor):
 	sigma_max= 3.0
 	ksize= 3.3 * sigma_max
 	kernel_size= int(max(ksize, 5)) # in imgaug kernel_size viene calcolato automaticamente dalla sigma così, ma forse si può semplificare a 3x3
-	blur_aug= T.GaussianBlur(kernel_size, sigma=(sigma_min, sigma_max))
+	#blur_aug= T.GaussianBlur(kernel_size, sigma=(sigma_min, sigma_max))
+	crop_aug= RandomCenterCrop(min_frac=args.min_crop_fract, max_frac=1.0, output_size=None)
 
-	transform_train = T.Compose(
-		[
-			T.Resize(size, interpolation=T.InterpolationMode.BICUBIC),
-			FlippingTransform(),
-			Rotate90Transform(),
-			#T.ToTensor(),
-			T.Normalize(mean=mean, std=std),
-		]
+	transf_list= []
+	if args.add_crop_augm:
+		transf_list.append(crop_aug)
+		
+	transf_list.extend(
+		T.Resize(size, interpolation=T.InterpolationMode.BICUBIC),
+		FlippingTransform(),
+		Rotate90Transform(),
+		#T.ToTensor(),
+		T.Normalize(mean=mean, std=std),
 	)
+
+	transform_train = T.Compose(transf_list)
+	
+	#transform_train = T.Compose(
+	#	[
+	#		T.Resize(size, interpolation=T.InterpolationMode.BICUBIC),
+	#		FlippingTransform(),
+	#		Rotate90Transform(),
+	#		#T.ToTensor(),
+	#		T.Normalize(mean=mean, std=std),
+	#	]
+	#)
 	
 	transform = T.Compose(
 		[
