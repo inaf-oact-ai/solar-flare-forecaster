@@ -467,6 +467,20 @@ def load_videomae_model(
 	
 	# - Load processor
 	image_processor = VideoMAEImageProcessor.from_pretrained(args.model)
+	
+	# - Check head initialization
+	if not inference_mode:
+		logger.info("Checking VideoMAE head weights ...")
+		suspicious = check_head_initialization(model)
+		if suspicious:
+			logger.info("VideoMAE model head has suspicious initialization values, will re-initialize them ...")
+			safe_reinit_head(model)
+
+			suspicious= check_head_initialization(model)
+			if suspicious:
+				logger.warning("After re-initialization, the VideoMAE head weights still are detected as suspicious ...")
+			else:
+				logger.info("After re-initialization, the VideoMAE head weights look numerically safe to start the training ...")
 
 	return model, image_processor
 		

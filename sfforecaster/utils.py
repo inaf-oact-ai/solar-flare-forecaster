@@ -265,6 +265,87 @@ def patch_scaler_instance(backbone) -> None:
 		print("Scaler patch: no 'scaler' attribute found; skipped.")
 
 
+HEAD_NAME_RE = re.compile(r"(?:^|\.)(head|classifier|cls|fc)(?:\.|$)", re.I)
+
+def find_head_modules(model: torch.nn.Module):
+	"""Return a dict {name: module} for likely classification heads."""
+	heads = {}
+	for name, module in model.named_modules():
+		if HEAD_NAME_RE.search(name) and isinstance(module, (nn.Linear, nn.Conv1d, nn.Conv2d, nn.Conv3d)):
+			heads[name] = module
+	# Fallback: if nothing matched, try last Linear in the model
+	if not heads:
+		last_linear = None
+		for name, module in model.named_modules():
+			if isinstance(module, nn.Linear):
+				last_linear = (name, module)
+		if last_linear:
+			heads = {last_linear[0]: last_linear[1]}
+	return heads
+
+def tensor_stats(t: torch.Tensor):
+	with torch.no_grad():
+		flat = t.view(-1).float().cpu()
+		return {
+			"shape": tuple(t.shape),	
+			"dtype": str(t.dtype),
+			"device": str(t.device),
+			"numel": flat.numel(),
+			"nan": torch.isnan(flat).any().item(),
+			"inf": torch.isinf(flat).any().item(),
+			"mean": flat.mean().item(),
+			"std": flat.std(unbiased=False).item(),
+			"min": flat.min().item(),
+			"max": flat.max().item(),
+			"abs_max": flat.abs().max().item(),
+		}
+
+def check_head_initialization(model: torch.nn.Module, abs_max_warn=10.0, std_warn=1.0):
+	"""
+		Print parameter stats for head modules and flag suspicious values.
+		Returns True if any suspicious parameter is found.
+	"""
+	heads = find_head_modules(model)
+	if not heads:
+		print("⚠️  No head-like modules found. (Names tried: head/classifier/cls/fc)")
+		return False
+
+	print(f"Found {len(heads)} head-like module(s): {list(heads.keys())}\n")
+	suspicious = False
+	for name, mod in heads.items():
+		for p_name, p in mod.named_parameters(recurse=False):
+			s = tensor_stats(p)
+			flag = s["nan"] or s["inf"] or (s["abs_max"] > abs_max_warn) or (s["std"] > std_warn)
+			suspicious |= bool(flag)
+			flag_str = "  ✅ OK"
+			if flag:
+				reasons = []
+				if s["nan"]: reasons.append("NaN")
+				if s["inf"]: reasons.append("Inf")
+				if s["abs_max"] > abs_max_warn: reasons.append(f"abs_max>{abs_max_warn}")
+				if s["std"] > std_warn: reasons.append(f"std>{std_warn}")
+				flag_str = "  ❌ SUSPICIOUS: " + ", ".join(reasons)
+			print(f"[{name}.{p_name}] {flag_str}")
+			print(f"    shape={s['shape']} dtype={s['dtype']} device={s['device']} numel={s['numel']}")
+			print(f"    mean={s['mean']:.6f} std={s['std']:.6f} min={s['min']:.6f} max={s['max']:.6f} abs_max={s['abs_max']:.6f}")
+		print()
+	return suspicious
+
+
+def safe_reinit_head(model: torch.nn.Module):
+	""" Reinitialize model head """
+	for name, mod in find_head_modules(model).items():
+		if isinstance(mod, nn.Linear):
+			nn.init.xavier_uniform_(mod.weight)
+			if mod.bias is not None:
+				nn.init.zeros_(mod.bias)
+			print(f"Re-initialized Linear head: {name}")
+		elif isinstance(mod, (nn.Conv1d, nn.Conv2d, nn.Conv3d)):
+			nn.init.kaiming_normal_(mod.weight, nonlinearity="linear")
+			if mod.bias is not None:
+				nn.init.zeros_(mod.bias)
+			print(f"Re-initialized Conv head: {name}")
+
 ##########################
 ##     OS UTILS
 ##########################
