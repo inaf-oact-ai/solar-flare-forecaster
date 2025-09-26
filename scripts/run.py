@@ -52,8 +52,8 @@ from sfforecaster.model import MultiHorizonVideoMAE, MoiraiForSequenceClassifica
 from sfforecaster.utils import *
 from sfforecaster.dataset import get_target_maps
 from sfforecaster.dataset import VideoDataset, ImgDataset, ImgStackDataset, TSDataset
-from sfforecaster.custom_transforms import FlippingTransform, Rotate90Transform
-from sfforecaster.custom_transforms import VideoFlipping, VideoResize, VideoNormalize, VideoRotate90 
+from sfforecaster.custom_transforms import FlippingTransform, Rotate90Transform, RandomCenterCrop
+from sfforecaster.custom_transforms import VideoFlipping, VideoResize, VideoNormalize, VideoRotate90, VideoRandomCenterCrop
 from sfforecaster.metrics import build_multi_label_metrics, build_single_label_metrics, build_ordinal_metrics
 from sfforecaster.trainer import CustomTrainer, CustomTrainerTS, TrainMetricsCallback, CudaGCCallback
 from sfforecaster.trainer import VideoDataCollator, ImgDataCollator, TSDataCollator, Uni2TSBatchCollator
