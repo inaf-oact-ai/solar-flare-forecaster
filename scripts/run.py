@@ -156,6 +156,10 @@ def get_args():
 	parser.set_defaults(ts_freeze_backbone=False)
 	parser.add_argument('-ts_max_freeze_layer_id', '--ts_max_freeze_layer_id', dest='ts_max_freeze_layer_id', required=False, type=int, default=-1, action='store',help='ID of the last layer kept frozen. -1 means all are frozen if --ts_freeze_backbone option is enabled (default=-1)')
 	
+	parser.add_argument('--check_videomae_head', dest='check_videomae_head', action='store_true', help='Reinitialize videoMAE head if detected with suspicious numerica weights (default=false)')	
+	parser.set_defaults(check_videomae_head=False)
+	
+	
 	# - Model training options
 	parser.add_argument('--run_eval_on_start', dest='run_eval_on_start', action='store_true',help='Run model evaluation on start for debug (default=false)')	
 	parser.set_defaults(run_eval_on_start=False)
@@ -447,29 +451,39 @@ def load_videomae_model(
 		model.eval()
 		
 	else:
-		if args.binary:
-			model = VideoMAEForVideoClassification.from_pretrained(args.model, num_labels=1) # tmp
-			in_features = model.classifier.in_features
-			model.classifier = torch.nn.Linear(in_features, 1)
-			model.config.num_labels = 1
-			model.config.problem_type = None
+		try:
+			if args.binary:
+				model = VideoMAEForVideoClassification.from_pretrained(args.model, num_labels=1) # tmp
+				in_features = model.classifier.in_features
+				model.classifier = torch.nn.Linear(in_features, 1)
+				model.config.num_labels = 1
+				model.config.problem_type = None
 		
-		else:
-			model = VideoMAEForVideoClassification.from_pretrained(
-				args.model,
-				problem_type="single_label_classification", 
-				id2label=id2label, 
-				label2id=label2id,
-				num_labels=num_labels
-				#attn_implementation="sdpa", # "flash_attention_2" 
-				#torch_dtype=torch.float16,  # "auto"
-			)
+			else:
+				model = VideoMAEForVideoClassification.from_pretrained(
+					args.model,
+					problem_type="single_label_classification", 
+					id2label=id2label, 
+					label2id=label2id,
+					num_labels=num_labels
+					#attn_implementation="sdpa", # "flash_attention_2" 
+					#torch_dtype=torch.float16,  # "auto"
+				)
+		except Exception as e:
+			logger.warning(f"Failed to load VideoMAE (err={str(e)}), trying alternative method ...")
+			model = VideoMAEForVideoClassification.from_pretrained(args.model)
+			
+			head_numout= 1 if args.binary else num_labels
+			in_features = model.classifier.in_features
+			model.classifier = torch.nn.Linear(in_features, head_numout)
+			model.config.num_labels = head_numout
+			model.config.problem_type = None
 	
 	# - Load processor
 	image_processor = VideoMAEImageProcessor.from_pretrained(args.model)
 	
 	# - Check head initialization
-	if not inference_mode:
+	if args.check_videomae_head and not inference_mode:
 		logger.info("Checking VideoMAE head weights ...")
 		suspicious = check_head_initialization(model)
 		if suspicious:
