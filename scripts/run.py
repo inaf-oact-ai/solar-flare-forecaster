@@ -105,6 +105,12 @@ def get_args():
 	parser.add_argument('--resize', dest='resize', action='store_true', help='Resize input image before model processor. If false the model processor will resize anyway to its image size (default=false)')	
 	parser.set_defaults(resize=False)
 	parser.add_argument('-resize_size', '--resize_size', dest='resize_size', required=False, type=int, default=224, action='store', help='Resize size in pixels used if --resize option is enabled (default=224)')	
+	parser.add_argument('--asinh_stretch', dest='asinh_stretch', action='store_true',help='Apply asinh stretch transform to input images (default=false)')	
+	parser.set_defaults(asinh_stretch=False)
+	parser.add_argument('-pmin', '--pmin', dest='pmin', required=False, type=float, default=0.5, action='store', help='Min percentile for asinh transform (default=0.5)')
+	parser.add_argument('-pmax', '--pmax', dest='pmax', required=False, type=float, default=99.5, action='store', help='Max percentile for asinh transform (default=99.5)')
+	parser.add_argument('-asinh_scale', '--asinh_scale', dest='asinh_scale', required=False, type=float, default=0.5, action='store', help='asinh_scale for asinh transform (default=0.5)')
+	
 	parser.add_argument('--add_crop_augm', dest='add_crop_augm', action='store_true', help='If enabled, add crop and resize augmentation in training (default=false)')	
 	parser.set_defaults(add_crop_augm=False)
 	parser.add_argument('-min_crop_fract', '--min_crop_fract', dest='min_crop_fract', required=False, type=float, default=0.65, action='store', help='Mininum crop fraction (default=0.65).')
@@ -903,6 +909,10 @@ def load_dataset(
 			load_as_gray=args.grayscale,
 			apply_zscale=args.zscale, zscale_contrast=args.zscale_contrast,
 			resize=args.resize, resize_size=args.resize_size,
+			apply_asinh_stretch=args.asinh_stretch,
+			pmin=args.pmin,
+			pmax=args.pmax,
+			asinh_scale=args.asinh_scale,			
 			nclasses=nclasses,
 			id2target=id2target,
 			multiout=args.multiout,
@@ -939,6 +949,10 @@ def load_dataset(
 				load_as_gray=args.grayscale,
 				apply_zscale=args.zscale, zscale_contrast=args.zscale_contrast,
 				resize=args.resize, resize_size=args.resize_size,
+				apply_asinh_stretch=args.asinh_stretch,
+				pmin=args.pmin,
+				pmax=args.pmax,
+				asinh_scale=args.asinh_scale,		
 				nclasses=nclasses,
 				id2target=id2target,
 				multiout=args.multiout,

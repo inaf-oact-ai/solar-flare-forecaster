@@ -621,7 +621,7 @@ def single_label_metrics(predictions, labels, target_names=None, chunk_size=64, 
 	# - Compute Heidke Skill Score (HSS)
 	#HSS= 2*((TP*TN)-(FP*FN))/( ((TP+FN)*(TN+FN)) + ((FP+TN)*(FP+TP)) )
 	HSS= 2*(TP*TN-FP*FN)/((TP+FN)*(TN+FN)+(TP+FP)*(FP+TN))
-           
+
 	# - Compute Gilbert Skill Score (GSS)
 	GSS= (TP- ( ((TP+FN)*(TP+FP))/(TP+FP+TN+FN) ) )/( (TP+FP+FN) - ( ((TP+FN)*(TP+FP))/(TP+FP+TN+FN) ) )
 	

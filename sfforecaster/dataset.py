@@ -421,6 +421,10 @@ class BaseVisDataset(BaseDataset):
 		zscale_contrast=0.25,
 		resize=False,
 		resize_size=224,
+		apply_asinh_stretch=False,
+		pmin=0.5,
+		pmax=99.5,
+		asinh_scale=0.5,
 	):
 		super().__init__(filename, transform=transform, verbose=verbose)
 		self.load_as_gray= load_as_gray
@@ -428,6 +432,10 @@ class BaseVisDataset(BaseDataset):
 		self.zscale_contrast= zscale_contrast
 		self.resize= resize
 		self.resize_size= resize_size
+		self.apply_asinh_stretch= apply_asinh_stretch
+		self.pmin= pmin
+		self.pmax= pmax
+		self.asinh_scale= asinh_scale
 		
 	def load_image(self, idx):
 		""" Load image as PyTorch tensor with transforms applied """
@@ -544,7 +552,11 @@ class BaseVisDataset(BaseDataset):
 				add_batch_axis=False,
 				resize=self.resize, resize_size=self.resize_size, 
 				apply_zscale=self.apply_zscale, contrast=self.zscale_contrast, 
-				set_nans_to_min=False, 
+				set_nans_to_min=False,
+				apply_asinh_stretch=self.apply_asinh_stretch,
+				pmin=self.pmin,
+				pmax=self.pmax,
+				asinh_scale=self.asinh_scale,
 				verbose=self.verbose
 			)
 		else:
@@ -554,7 +566,11 @@ class BaseVisDataset(BaseDataset):
 				add_batch_axis=False,
 				resize=self.resize, resize_size=self.resize_size, 
 				apply_zscale=self.apply_zscale, contrast=self.zscale_contrast, 
-				set_nans_to_min=False, 
+				set_nans_to_min=False,
+				apply_asinh_stretch=self.apply_asinh_stretch,
+				pmin=self.pmin,
+				pmax=self.pmax,
+				asinh_scale=self.asinh_scale,
 				verbose=self.verbose
 			)
 			
@@ -602,6 +618,10 @@ class VideoDataset(BaseVisDataset):
 		zscale_contrast=0.25,
 		resize=False,
 		resize_size=224,
+		apply_asinh_stretch=False,
+		pmin=0.5,
+		pmax=99.5,
+		asinh_scale=0.5,
 		nclasses=None,
 		id2target=None,
 		multiout=False,
@@ -616,7 +636,11 @@ class VideoDataset(BaseVisDataset):
 			apply_zscale=apply_zscale, 
 			zscale_contrast=zscale_contrast,
 			resize=resize,
-			resize_size=resize_size
+			resize_size=resize_size,
+			apply_asinh_stretch=apply_asinh_stretch,
+			pmin=pmin,
+			pmax=pmax,
+			asinh_scale=asinh_scale
 		)
 		
 		# - Check nclasses		
@@ -678,6 +702,10 @@ class ImgDataset(BaseVisDataset):
 		zscale_contrast=0.25,
 		resize=False,
 		resize_size=224,
+		apply_asinh_stretch=False,
+		pmin=0.5,
+		pmax=99.5,
+		asinh_scale=0.5,
 		nclasses=None,
 		id2target=None,
 		multiout=False,
@@ -692,7 +720,11 @@ class ImgDataset(BaseVisDataset):
 			apply_zscale=apply_zscale, 
 			zscale_contrast=zscale_contrast,
 			resize=resize, 
-			resize_size=resize_size
+			resize_size=resize_size,
+			apply_asinh_stretch=apply_asinh_stretch,
+			pmin=pmin,
+			pmax=pmax,
+			asinh_scale=asinh_scale
 		)
 
 		# - Check nclasses		
@@ -755,6 +787,10 @@ class ImgStackDataset(BaseVisDataset):
 		zscale_contrast=0.25,
 		resize=False,
 		resize_size=224,
+		apply_asinh_stretch=False,
+		pmin=0.5,
+		pmax=99.5,
+		asinh_scale=0.5,
 		nclasses=None,
 		id2target=None,
 		multiout=False,
@@ -769,7 +805,11 @@ class ImgStackDataset(BaseVisDataset):
 			apply_zscale=apply_zscale, 
 			zscale_contrast=zscale_contrast,
 			resize=resize, 
-			resize_size=resize_size
+			resize_size=resize_size,
+			apply_asinh_stretch=apply_asinh_stretch,
+			pmin=pmin,
+			pmax=pmax,
+			asinh_scale=asinh_scale
 		)
 		
 		# - Check nclasses		

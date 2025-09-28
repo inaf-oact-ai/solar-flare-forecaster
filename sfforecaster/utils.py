@@ -434,7 +434,22 @@ def read_datalist(filename, key="data"):
 ##########################
 ##    READ IMAGE
 ##########################
-def read_img(filename, nchans=1, norm_range=(0.,1.), resize=False, resize_size=224, apply_zscale=True, contrast=0.25, to_uint8=False, set_nans_to_min=False, verbose=False):
+def read_img(
+	filename, 
+	nchans=1, 
+	norm_range=(0.,1.), 
+	resize=False, 
+	resize_size=224, 
+	apply_zscale=True, 
+	contrast=0.25, 
+	to_uint8=False, 
+	set_nans_to_min=False, 
+	apply_asinh_stretch=False,
+	pmin=0.5,
+	pmax=99.5,
+	asinh_scale=0.5,
+	verbose=False
+):
   """ Read fits image and returns a numpy array """
 
   # - Check if filename is str, otherwise try to load it as Bytes.io with pillow
@@ -476,6 +491,10 @@ def read_img(filename, nchans=1, norm_range=(0.,1.), resize=False, resize_size=2
     apply_zscale=apply_zscale, contrast=contrast,
     to_uint8=to_uint8,
     set_nans_to_min=set_nans_to_min,
+    apply_asinh_stretch=apply_asinh_stretch,
+    pmin=pmin,
+    pmax=pmax,
+    asinh_scale=asinh_scale,
     verbose=verbose
   )
   
@@ -630,7 +649,76 @@ def get_zscaled_data(data, contrast=0.25):
 
 	return data_transf
 	
-def transform_img(data, nchans=1, norm_range=(0.,1.), resize=False, resize_size=224, apply_zscale=True, contrast=0.25, to_uint8=False, set_nans_to_min=False, verbose=False):
+	
+def get_asinh_stretched_data(
+	img: np.ndarray,
+	pmin: float = 0.5,           # lower percentile for robust clipping
+	pmax: float = 99.5,          # upper percentile for robust clipping
+	asinh_scale: float = 0.5,    # s in asinh(x/s); try 0.3–0.7
+	out_dtype = np.float32
+) -> np.ndarray:
+	"""
+		Robust HMI preprocessing:
+			1) Normalize input to [0,1] if it's uint8 (0..255) or >1.
+			2) Map to signed [-1,1] around mid-gray (0.5 ↔ 0 field).
+			3) Robust clip using percentiles (pmin–pmax).
+			4) Symmetric rescale to [-1,1] using the larger abs bound.
+			5) asinh compression: z = asinh(y / s) normalized back to [-1,1].
+			6) Map to [0,1].
+
+		Works for single-channel images. Returns float in [0,1].
+	"""
+
+	x = img.astype(np.float32, copy=False)
+
+	# 1) Bring to [0,1] if clearly in 0..255 or general 0..max>1
+	x_min, x_max = float(x.min()), float(x.max())
+	if x_max > 1.0:
+		x = (x - x_min) / (x_max - x_min + 1e-12)
+
+	# 2) Signed around mid-gray (0.5 ~ zero field)
+	xs = (x - 0.5) * 2.0  # now roughly [-1,1], sign carries polarity
+
+	# 3) Robust clipping by percentiles
+	lo = np.percentile(xs, pmin)
+	hi = np.percentile(xs, pmax)
+	xs = np.clip(xs, lo, hi)
+
+	# 4) Symmetric rescale to [-1,1] using the larger magnitude bound
+	m = max(abs(lo), abs(hi))
+	if m > 0:
+		y = xs / m
+	else:
+		y = np.zeros_like(xs, dtype=np.float32)
+
+	# 5) asinh compression, normalized back to [-1,1]
+	#    z_raw in [-asinh(1/s), +asinh(1/s)] -> divide to re-span [-1,1]
+	s = float(asinh_scale)
+	denom = np.arcsinh(1.0 / (s + 1e-12))
+	z = np.arcsinh(y / (s + 1e-12)) / (denom + 1e-12)
+
+	# 6) Map to [0,1]
+	out = (z + 1.0) * 0.5
+	
+	return out.astype(out_dtype, copy=False)	
+	
+	
+def transform_img(
+	data, 
+	nchans=1, 
+	norm_range=(0.,1.), 
+	resize=False, 
+	resize_size=224, 
+	apply_zscale=True, 
+	contrast=0.25, 
+	to_uint8=False, 
+	set_nans_to_min=False,
+	apply_asinh_stretch=False,
+	pmin=0.5,
+	pmax=99.5,
+	asinh_scale=0.5,
+	verbose=False
+):
   """ Transform input image data and return transformed data """
 
   # - Make copy
@@ -659,6 +747,11 @@ def transform_img(data, nchans=1, norm_range=(0.,1.), resize=False, resize_size=
     transform= ZScaleInterval(contrast=contrast)
     data_zscaled= transform(data_transf)
     data_transf= data_zscaled
+    
+	# - Apply asinh stretch?
+  if apply_asinh_stretch:
+  	data_stretched= get_asinh_stretched_data(data_transf, pmin, pmax, asinh_scale)
+  	data_transf= data_stretched 
 
   # - Resize image?
   if resize:
@@ -732,7 +825,19 @@ def transform_img(data, nchans=1, norm_range=(0.,1.), resize=False, resize_size=
 ##########################
 ##    IMG PIL LOADERS
 ##########################	
-def load_img_as_pil_float(filename, resize=False, resize_size=224, apply_zscale=True, contrast=0.25, set_nans_to_min=False, verbose=False):
+def load_img_as_pil_float(
+	filename, 
+	resize=False, 
+	resize_size=224, 
+	apply_zscale=False, 
+	contrast=0.25, 
+	set_nans_to_min=False, 
+	apply_asinh_stretch=False,
+	pmin=0.5,
+	pmax=99.5,
+	asinh_scale=0.5,
+	verbose=False
+):
   """ Convert numpy array to PIL float image norm to [0,1] """
 
   # - Read FITS from file and get transformed npy array
@@ -744,6 +849,10 @@ def load_img_as_pil_float(filename, resize=False, resize_size=224, apply_zscale=
     apply_zscale=apply_zscale, contrast=contrast,
     to_uint8=False,
     set_nans_to_min=set_nans_to_min,
+    apply_asinh_stretch=apply_asinh_stretch,
+    pmin=pmin, 
+    pmax=pmax,
+    asinh_scale=asinh_scale,
     verbose=verbose
   )
   if data is None:
@@ -753,7 +862,19 @@ def load_img_as_pil_float(filename, resize=False, resize_size=224, apply_zscale=
   # - Convert to PIL image
   return Image.fromarray(data)	
   
-def load_img_as_pil_rgb(filename, resize=False, resize_size=224, apply_zscale=True, contrast=0.25, set_nans_to_min=False, verbose=False):
+def load_img_as_pil_rgb(
+	filename, 
+	resize=False, 
+	resize_size=224, 
+	apply_zscale=False, 
+	contrast=0.25, 
+	set_nans_to_min=False,
+	apply_asinh_stretch=False,
+	pmin=0.5,
+	pmax=99.5,
+	asinh_scale=0.5, 
+	verbose=False
+):
   """ Convert numpy array to PIL 3chan RGB image norm to [0,255], uint8 """
 
   # - Read FITS from file and get transformed npy array
@@ -765,6 +886,10 @@ def load_img_as_pil_rgb(filename, resize=False, resize_size=224, apply_zscale=Tr
     apply_zscale=apply_zscale, contrast=contrast,
     to_uint8=False,
     set_nans_to_min=set_nans_to_min,
+    apply_asinh_stretch=apply_asinh_stretch,
+    pmin=pmin, 
+    pmax=pmax,
+    asinh_scale=asinh_scale,
     verbose=verbose
   )
   if data is None:
@@ -777,7 +902,21 @@ def load_img_as_pil_rgb(filename, resize=False, resize_size=224, apply_zscale=Tr
 ##########################
 ##    IMG NUMPY LOADERS
 ##########################	
-def load_img_as_npy_float(filename, add_chan_axis=True, add_batch_axis=True, resize=False, resize_size=224, apply_zscale=True, contrast=0.25, set_nans_to_min=False, verbose=False):
+def load_img_as_npy_float(
+	filename, 
+	add_chan_axis=True, 
+	add_batch_axis=True, 
+	resize=False, 
+	resize_size=224, 
+	apply_zscale=False, 
+	contrast=0.25, 
+	set_nans_to_min=False, 
+	apply_asinh_stretch=False,
+	pmin=0.5,
+	pmax=99.5,
+	asinh_scale=0.5,
+	verbose=False
+):
   """ Return numpy float image array norm to [0,1] """
 
   # - Read FITS from file and get transformed npy array
@@ -789,6 +928,10 @@ def load_img_as_npy_float(filename, add_chan_axis=True, add_batch_axis=True, res
     apply_zscale=apply_zscale, contrast=contrast,
     to_uint8=False,
     set_nans_to_min=set_nans_to_min,
+    apply_asinh_stretch=apply_asinh_stretch,
+    pmin=pmin, 
+    pmax=pmax,
+    asinh_scale=asinh_scale,
     verbose=verbose
   )
   if data is None:
@@ -808,7 +951,21 @@ def load_img_as_npy_float(filename, add_chan_axis=True, add_batch_axis=True, res
 
   return data.astype(float)
   
-def load_img_as_npy_rgb_float(filename, add_chan_axis=True, add_batch_axis=True, resize=False, resize_size=224, apply_zscale=True, contrast=0.25, set_nans_to_min=False, verbose=False):
+def load_img_as_npy_rgb_float(
+	filename, 
+	add_chan_axis=True, 
+	add_batch_axis=True, 
+	resize=False, 
+	resize_size=224, 
+	apply_zscale=False, 
+	contrast=0.25, 
+	set_nans_to_min=False, 
+	apply_asinh_stretch=False,
+	pmin=0.5,
+	pmax=99.5,
+	asinh_scale=0.5,
+	verbose=False
+):
   """ Return numpy float image 3-chan array norm to [0,1] """
 
   # - Read FITS from file and get transformed npy array
@@ -820,6 +977,10 @@ def load_img_as_npy_rgb_float(filename, add_chan_axis=True, add_batch_axis=True,
     apply_zscale=apply_zscale, contrast=contrast,
     to_uint8=False,
     set_nans_to_min=set_nans_to_min,
+    apply_asinh_stretch=apply_asinh_stretch,
+    pmin=pmin, 
+    pmax=pmax,
+    asinh_scale=asinh_scale,
     verbose=verbose
   )
   if data is None:
