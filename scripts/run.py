@@ -200,6 +200,8 @@ def get_args():
 	parser.add_argument('--compute_best_tss', dest='compute_best_tss', action='store_true', help='Compute TSS best vs threshold in evaluation (default=false)')	
 	parser.set_defaults(compute_best_tss=False)
 	
+	parser.add_argument('--compute_metrics_vs_thr', dest='compute_metrics_vs_thr', action='store_true', help='Compute metrics vs threshold in evaluation (default=false)')	
+	parser.set_defaults(compute_metrics_vs_thr=False)
 	
 	parser.add_argument('-seed', '--seed', dest='seed', required=False, type=int, default=42, action='store',help='Random seed that will be set at the beginning of training (default=42)')
 	
@@ -1536,7 +1538,7 @@ def main():
 	elif args.ordinal:
 		compute_metrics_custom= build_ordinal_metrics(label_names, thresholds=args.ordinal_thresholds)
 	else:
-		compute_metrics_custom= build_single_label_metrics(label_names, chunk_size=chunk_size, compute_best_tss=args.compute_best_tss)
+		compute_metrics_custom= build_single_label_metrics(label_names, chunk_size=chunk_size, compute_best_tss=args.compute_best_tss, compute_metrics_vs_thr=args.compute_metrics_vs_thr)
 		
 	# - Compute class weights
 	#num_labels = model.config.num_labels # this is modified in ordinal model

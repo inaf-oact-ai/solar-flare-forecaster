@@ -346,6 +346,13 @@ def safe_reinit_head(model: torch.nn.Module):
 				torch.nn.init.zeros_(mod.bias)
 			print(f"Re-initialized Conv head: {name}")
 
+
+##########################
+##     MATH UTILS
+##########################
+def safe_div(num, den, eps=1e-12):
+	return num / (den + eps)
+    
 ##########################
 ##     OS UTILS
 ##########################

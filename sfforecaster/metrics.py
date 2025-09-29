@@ -208,6 +208,15 @@ def compute_micro_metrics_from_confusion_matrix(cm, eps=1e-7):
 		"overall_accuracy": overall_acc
 	}
 	
+def binary_counts(y_true: np.ndarray, y_pred: np.ndarray):
+	"""Return TN, FP, FN, TP as floats."""
+	# Confusion components
+	TP = float(np.sum((y_true == 1) & (y_pred == 1)))
+	TN = float(np.sum((y_true == 0) & (y_pred == 0)))
+	FP = float(np.sum((y_true == 0) & (y_pred == 1)))
+	FN = float(np.sum((y_true == 1) & (y_pred == 0)))
+	return TN, FP, FN, TP	
+	
 def best_tss_from_probs(p_pos, y_true, num_ticks=101, eps=1e-7):
 	""" For binary classification: compute TSS vs threshold and select best TSS"""
 	# p_pos: numpy array of P(class=1) ; y_true: {0,1}
@@ -398,6 +407,153 @@ def bss_from_prob(probs, labels, eps=1e-12):
 		return 1.0 if mse < eps else 0.0
 	score= 1.0 - (mse / mse_ref)	
 	return score
+	
+	
+def binary_curves_from_probs(
+	p_pos: np.ndarray,
+	y_true: np.ndarray,
+	num_ticks: int = 1001,
+	eps: float = 1e-12,
+) -> Dict[str, Any]:
+	"""
+		Build threshold curves for a binary classifier from positive-class probabilities.
+
+		Parameters
+		----------
+		p_pos : array-like, shape (N,)
+			Predicted probability P(y=1).
+		y_true : array-like, shape (N,)
+			Ground-truth labels in {0,1}.
+		num_ticks : int
+			Number of thresholds in [0,1] to scan (inclusive).
+		eps : float
+			Numerical stability constant.
+
+		Returns
+		-------
+		result : dict
+		{
+			"thresholds": np.ndarray,
+			"precision": np.ndarray,
+			"recall": np.ndarray,
+			"f1": np.ndarray,
+			"tss": np.ndarray,
+			"hss": np.ndarray,
+			"mcc": np.ndarray,
+			"apss": np.ndarray,
+			"bss": float,               # constant (probabilistic)
+			"thr_at_max_tss": float,
+			"thr_at_max_f1": float,
+			"thr_at_max_mcc": float,
+			"idx_best_tss": int,
+			"idx_best_f1": int,
+			"idx_best_mcc": int,
+			"counts_at_best_tss": (TN, FP, FN, TP),
+			"counts_at_best_f1": (TN, FP, FN, TP),
+			"counts_at_best_mcc": (TN, FP, FN, TP),
+			"thr_at_precision": callable,  # thr = thr_at_precision(target_ppv, min_recall=0.0)
+			"thr_at_recall": callable,     # thr = thr_at_recall(target_tpr, min_precision=0.0)
+		}
+	"""
+	p_pos = np.asarray(p_pos, dtype=np.float64)
+	y_true = np.asarray(y_true, dtype=np.int64)
+	assert p_pos.shape[0] == y_true.shape[0], "Length mismatch"
+
+	thresholds = np.linspace(0.0, 1.0, num_ticks)
+
+	prec = np.full_like(thresholds, np.nan, dtype=np.float64)
+	rec  = np.full_like(thresholds, np.nan, dtype=np.float64)
+	f1   = np.full_like(thresholds, np.nan, dtype=np.float64)
+	tss  = np.full_like(thresholds, np.nan, dtype=np.float64)
+	hss  = np.full_like(thresholds, np.nan, dtype=np.float64)
+	mcc  = np.full_like(thresholds, np.nan, dtype=np.float64)
+	apss = np.full_like(thresholds, np.nan, dtype=np.float64)
+
+	# Brier Skill Score is probabilistic (no threshold)
+	bss = bss_from_prob(p_pos, y_true, eps=eps)
+	
+	for i, t in enumerate(thresholds):
+		y_pred = (p_pos >= t).astype(np.int64)
+
+		TN, FP, FN, TP = binary_counts(y_true, y_pred)
+
+		# Rates
+		TPR = safe_div(TP, TP + FN, eps)  # recall/sensitivity
+		TNR = safe_div(TN, TN + FP, eps)  # specificity
+		PPV = safe_div(TP, TP + FP, eps)  # precision
+
+		# Metrics
+		rec[i]  = TPR
+		prec[i] = PPV
+		f1[i]   = 2.0 * safe_div(PPV * TPR, PPV + TPR, eps)
+
+		# TSS and HSS (equitable/HSS2)
+		tss[i]  = TPR + TNR - 1.0
+		hss[i]  = (2.0 * (TP*TN - FP*FN)) / ( (TP+FN)*(FN+TN) + (TP+FP)*(FP+TN) + eps)
+
+		# MCC
+		mcc_num = (TP*TN - FP*FN)
+		mcc_den = np.sqrt((TP+FP)*(TP+FN)*(TN+FP)*(TN+FN) + eps)
+		mcc[i]  = mcc_num / mcc_den
+
+		# Appleman's Skill Score
+		apss[i] = apss_from_counts(TP, FP, TN, FN, eps=eps)
+
+
+	# Best thresholds by common criteria
+	idx_best_tss = int(np.nanargmax(tss))
+	idx_best_f1  = int(np.nanargmax(f1))
+	idx_best_mcc = int(np.nanargmax(mcc))
+	
+	# “crossing” of precision and recall (closest point)
+	idx_cross = int(np.nanargmin(np.abs(prec - rec)))
+
+	def _counts_at(idx: int):
+		y_pred = (p_pos >= thresholds[idx]).astype(np.int64)
+		return binary_counts(y_true, y_pred)
+
+	# Targeted operating point finders (simple greedy from high->low thresholds)
+	def thr_at_precision(target_ppv: float, min_recall: float = 0.0) -> Optional[float]:
+		"""Return the highest threshold whose precision >= target_ppv and recall >= min_recall."""
+		ok = np.where((prec >= target_ppv) & (rec >= min_recall))[0]
+		if ok.size == 0:
+			return None
+		return float(thresholds[ok[-1]])
+
+	def thr_at_recall(target_tpr: float, min_precision: float = 0.0) -> Optional[float]:
+		"""Return the lowest threshold whose recall >= target_tpr and precision >= min_precision."""
+		ok = np.where((rec >= target_tpr) & (prec >= min_precision))[0]
+		if ok.size == 0:
+			return None
+		return float(thresholds[ok[0]])
+
+	return {
+		"thresholds": thresholds,
+		"precision":  prec,
+		"recall":     rec,
+		"f1":         f1,
+		"tss":        tss,
+		"hss":        hss,
+		"mcc":        mcc,
+		"apss":       apss,
+		"bss":        float(bss),
+
+		"idx_best_tss": idx_best_tss,
+		"idx_best_f1":  idx_best_f1,
+		"idx_best_mcc": idx_best_mcc,
+		"idx_best_precrec": idx_cross, #often near idx_best_f1
+
+		"thr_at_max_tss": float(thresholds[idx_best_tss]),
+		"thr_at_max_f1":  float(thresholds[idx_best_f1]),
+		"thr_at_max_mcc": float(thresholds[idx_best_mcc]),
+
+		"counts_at_best_tss": _counts_at(idx_best_tss),
+		"counts_at_best_f1":  _counts_at(idx_best_f1),
+		"counts_at_best_mcc": _counts_at(idx_best_mcc),
+
+		"thr_at_precision":   thr_at_precision,
+		"thr_at_recall":      thr_at_recall,
+	}	
     
 ###########################################
 ##   MULTI-LABEL CLASS METRICS
@@ -502,7 +658,7 @@ def build_multi_label_metrics(target_names):
 ###########################################
 ##   SINGLE-LABEL CLASS METRICS
 ###########################################
-def single_label_metrics(predictions, labels, target_names=None, chunk_size=64, compute_best_tss=False):
+def single_label_metrics(predictions, labels, target_names=None, chunk_size=64, compute_best_tss=False, compute_metrics_vs_thr=False):
 	""" Helper function to compute single label metrics """
 	
 	# - First, apply sigmoid on predictions which are of shape (batch_size, num_labels)
@@ -588,7 +744,7 @@ def single_label_metrics(predictions, labels, target_names=None, chunk_size=64, 
 		TP = np.diag(cm)
 		TN = cm.sum() - (FP + FN + TP)
 	
-	eps= 1.e-7
+	eps= 1.e-12
 	
 	# - Sensitivity, hit rate, recall, or true positive rate
 	TPR = TP/(TP + FN + eps)
@@ -630,7 +786,11 @@ def single_label_metrics(predictions, labels, target_names=None, chunk_size=64, 
 	#MCC= ((TP*TN)-(FP*FN))/np.sqrt( (TP+FP)*(TP+FN)*(TN+FP)*(TN+FN) )
 	MCC_coeff= matthews_corrcoef(y_true=y_true, y_pred=y_pred)
 			
-	print(f"FP={FP}, FN={FN}, TP={TP}, TN={TN}, ACC={ACC}, accuracy={accuracy}, TSS={TSS}, HSS={HSS}, GSS={GSS}, MCC_coeff={MCC_coeff}")
+	mcc_num = (TP*TN - FP*FN)
+	mcc_den = np.sqrt((TP+FP)*(TP+FN)*(TN+FP)*(TN+FN) + eps)
+	MCC  = mcc_num / mcc_den	
+			
+	print(f"FP={FP}, FN={FN}, TP={TP}, TN={TN}, ACC={ACC}, accuracy={accuracy}, TSS={TSS}, HSS={HSS}, GSS={GSS}, MCC_coeff={MCC_coeff}, MCC={MCC}")
 	
 	# - Compute summary metrics
 	if not binary_class:
@@ -686,7 +846,8 @@ def single_label_metrics(predictions, labels, target_names=None, chunk_size=64, 
 		'tss': TSS,
 		'hss': HSS,
 		'gss': GSS,
-		'mcc': MCC_coeff,
+		'mcc_sklearn': MCC_coeff,
+		'mcc': MCC,
 		'tss_exp_avg': tss_expected_avg,
 		'tss_exp_weighted': tss_expected_w,
 		'sol_loss_mean_of_batches': sol_loss_mean_of_batches,
@@ -736,6 +897,60 @@ def single_label_metrics(predictions, labels, target_names=None, chunk_size=64, 
 				"tss_best_tpr": best["tpr"],
 				"tss_best_tnr": best["tnr"],
 			})
+			
+		if compute_metrics_vs_thr:
+			print("Computing metrics vs threshold ...")
+			
+			# - probs from logits already computed above
+			p_pos = probs[:, 1].numpy()          # assumes index 1 is positive (C+ or M+)
+			y_true_np = y_true
+			
+			curves = binary_curves_from_probs(
+				p_pos=p_pos,
+				y_true=y_true_np,
+				num_ticks=1001
+			)
+			
+			thr = curves["thresholds"]
+			tss = curves["tss"]
+			hss = curves["hss"]
+			mcc = curves["mcc"]
+			f1  = curves["f1"]
+			apss= curves["apss"]
+			bss = curves["bss"]
+			prec= curves["precision"]
+			rec= curves["rec"]
+
+			i_tss = curves["idx_best_tss"]
+			i_f1  = curves["idx_best_f1"]
+			i_precrec   = curves["idx_best_precrec"]
+
+			best_thr_tss = float(thr[i_tss])
+			best_thr_f1  = float(thr[i_f1])
+			best_thr_precrec   = float(thr[i_precrec])
+			
+			prec_at_best_precrec= float(prec[i_precrec])
+			rec_at_best_precrec= float(rec[i_precrec])
+			f1_at_best_precrec= float(f1[i_precrec])
+			tss_at_best_precrec= float(tss[i_precrec])
+			hss_at_best_precrec= float(hss[i_precrec])
+			mcc_at_best_precrec= float(mcc[i_precrec])
+			apss_at_best_precrec= float(apss[i_precrec])
+			bss_at_best_precrec= float(bss[i_precrec])
+			
+			metrics.update({
+				"thr_best_tss": best_thr_tss,
+				"thr_best_f1": best_thr_f1,
+				"thr_best_precrec": best_thr_precrec,
+				"prec_best_precrec": prec_at_best_precrec,
+				"rec_best_precrec": rec_at_best_precrec,
+				"f1_best_precrec": f1_at_best_precrec,
+				"tss_best_precrec": tss_at_best_precrec,
+				"hss_best_precrec": hss_at_best_precrec,
+				"mcc_best_precrec": mcc_at_best_precrec,
+				"apss_best_precrec": apss_at_best_precrec,
+				"bss_best_precrec": bss_at_best_precrec
+			})
 		
 		# - Compute individual class metrics for the binary case
 		# class1 = "positive" (the second label in label_indices / confusion matrix)
@@ -778,7 +993,7 @@ def single_label_metrics(predictions, labels, target_names=None, chunk_size=64, 
 	  
 	return metrics
 
-def build_single_label_metrics(target_names, chunk_size, compute_best_tss):
+def build_single_label_metrics(target_names, chunk_size, compute_best_tss, compute_metrics_vs_thr):
 
 	def compute_single_label_metrics(p: EvalPrediction):
 		""" Compute metrics """
@@ -786,6 +1001,7 @@ def build_single_label_metrics(target_names, chunk_size, compute_best_tss):
 		nonlocal target_names
 		nonlocal chunk_size
 		nonlocal compute_best_tss
+		nonlocal compute_metrics_vs_thr
 		
 		# - Compute all metrics
 		metrics = single_label_metrics(
@@ -793,7 +1009,8 @@ def build_single_label_metrics(target_names, chunk_size, compute_best_tss):
 			labels=p.label_ids,
 			target_names=target_names,
 			chunk_size=chunk_size,
-			compute_best_tss=compute_best_tss
+			compute_best_tss=compute_best_tss,
+			compute_metrics_vs_thr=compute_metrics_vs_thr
 		)
 		
 		# - Trainer wants only the scalar metrics
@@ -804,6 +1021,7 @@ def build_single_label_metrics(target_names, chunk_size, compute_best_tss):
 			"f1score_weighted": float(metrics["f1score_weighted"]),
 			"f1score_micro": float(metrics["f1score_micro"]),
 			"f1score_macro": float(metrics["f1score_macro"]),
+			"mcc_sklearn": float(metrics["mcc_sklearn"]),
 			"mcc": float(metrics["mcc"]),
 		}
 		
@@ -838,6 +1056,25 @@ def build_single_label_metrics(target_names, chunk_size, compute_best_tss):
 					"tss_best_tnr": float(metrics["tss_best_tnr"])
 				}
 			)
+			
+		# - Check if metrics vs threshold are present
+		if "thr_best_prec_rec" in metrics:
+			metrics_scalar.update(
+				{
+					"thr_best_f1": float(metrics["thr_best_f1"]),
+					"thr_best_tss": float(metrics["thr_best_tss"]),
+					"thr_best_precrec": float(metrics["thr_best_precrec"]),
+					"prec_best_precrec": float(metrics["prec_best_precrec"]),
+					"rec_best_precrec": float(metrics["rec_best_precrec"]),
+					"f1_best_precrec": float(metrics["f1_best_precrec"]),
+					"tss_best_precrec": float(metrics["tss_best_precrec"]),
+					"hss_best_precrec": float(metrics["hss_best_precrec"]),
+					"mcc_best_precrec": float(metrics["mcc_best_precrec"]),
+					"apss_best_precrec": float(metrics["apss_best_precrec"]),
+					"bss_best_precrec": float(metrics["bss_best_precrec"]),
+				}
+			)
+		
 			
 		# - Check if binary TSS/F1 per individual classes are present
 		if "tss_pos" in metrics:
