@@ -920,7 +920,7 @@ def single_label_metrics(predictions, labels, target_names=None, chunk_size=64, 
 			apss= curves["apss"]
 			bss = curves["bss"]
 			prec= curves["precision"]
-			rec= curves["rec"]
+			rec= curves["recall"]
 
 			i_tss = curves["idx_best_tss"]
 			i_f1  = curves["idx_best_f1"]
