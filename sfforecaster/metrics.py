@@ -1070,7 +1070,7 @@ def build_single_label_metrics(target_names, chunk_size, compute_best_tss, compu
 			)
 			
 		# - Check if metrics vs threshold are present
-		if "thr_best_prec_rec" in metrics:
+		if "thr_best_precrec" in metrics:
 			metrics_scalar.update(
 				{
 					"thr_best_f1": float(metrics["thr_best_f1"]),
