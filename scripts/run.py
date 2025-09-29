@@ -1531,6 +1531,7 @@ def main():
 	
 	# - Set metrics options
 	chunk_size= training_opts.per_device_train_batch_size if dataset_cv is None else training_opts.per_device_eval_batch_size
+	binary_thr= None if args.binary_thr==0.5 else args.binary_thr
 	
 	# - Set metrics
 	if args.multilabel:
@@ -1538,7 +1539,13 @@ def main():
 	elif args.ordinal:
 		compute_metrics_custom= build_ordinal_metrics(label_names, thresholds=args.ordinal_thresholds)
 	else:
-		compute_metrics_custom= build_single_label_metrics(label_names, chunk_size=chunk_size, compute_best_tss=args.compute_best_tss, compute_metrics_vs_thr=args.compute_metrics_vs_thr)
+		compute_metrics_custom= build_single_label_metrics(
+			label_names, 
+			chunk_size=chunk_size, 
+			compute_best_tss=args.compute_best_tss, 
+			compute_metrics_vs_thr=args.compute_metrics_vs_thr,
+			binary_thr=binary_thr
+		)
 		
 	# - Compute class weights
 	#num_labels = model.config.num_labels # this is modified in ordinal model
