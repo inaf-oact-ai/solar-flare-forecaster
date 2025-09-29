@@ -1159,7 +1159,7 @@ def run_test(
 
 	# - Save metric curves			
 	if args.compute_metrics_vs_thr and args.save_metric_curves:
-		out_csv = os.path.join(args.output_dir, "metrics_curves.csv")
+		out_csv = os.path.join(args.outdir, "metrics_curves.csv")
 		logger.info(f"Saving metric curves to {out_csv} ...")	
 		save_curves_csv_from_predictions(trainer, dataset, out_csv, num_ticks=1001)
     	
