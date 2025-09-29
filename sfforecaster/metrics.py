@@ -918,7 +918,6 @@ def single_label_metrics(predictions, labels, target_names=None, chunk_size=64, 
 			mcc = curves["mcc"]
 			f1  = curves["f1"]
 			apss= curves["apss"]
-			bss = curves["bss"]
 			prec= curves["precision"]
 			rec= curves["recall"]
 
@@ -943,14 +942,13 @@ def single_label_metrics(predictions, labels, target_names=None, chunk_size=64, 
 				"thr_best_tss": best_thr_tss,
 				"thr_best_f1": best_thr_f1,
 				"thr_best_precrec": best_thr_precrec,
-				"prec_best_precrec": prec_at_best_precrec,
-				"rec_best_precrec": rec_at_best_precrec,
+				"precision_best_precrec": prec_at_best_precrec,
+				"recall_best_precrec": rec_at_best_precrec,
 				"f1_best_precrec": f1_at_best_precrec,
 				"tss_best_precrec": tss_at_best_precrec,
 				"hss_best_precrec": hss_at_best_precrec,
 				"mcc_best_precrec": mcc_at_best_precrec,
-				"apss_best_precrec": apss_at_best_precrec,
-				"bss_best_precrec": bss_at_best_precrec
+				"apss_best_precrec": apss_at_best_precrec
 			})
 		
 		# - Compute individual class metrics for the binary case
@@ -1065,14 +1063,13 @@ def build_single_label_metrics(target_names, chunk_size, compute_best_tss, compu
 					"thr_best_f1": float(metrics["thr_best_f1"]),
 					"thr_best_tss": float(metrics["thr_best_tss"]),
 					"thr_best_precrec": float(metrics["thr_best_precrec"]),
-					"prec_best_precrec": float(metrics["prec_best_precrec"]),
-					"rec_best_precrec": float(metrics["rec_best_precrec"]),
+					"precision_best_precrec": float(metrics["precision_best_precrec"]),
+					"recall_best_precrec": float(metrics["recall_best_precrec"]),
 					"f1_best_precrec": float(metrics["f1_best_precrec"]),
 					"tss_best_precrec": float(metrics["tss_best_precrec"]),
 					"hss_best_precrec": float(metrics["hss_best_precrec"]),
 					"mcc_best_precrec": float(metrics["mcc_best_precrec"]),
 					"apss_best_precrec": float(metrics["apss_best_precrec"]),
-					"bss_best_precrec": float(metrics["bss_best_precrec"]),
 				}
 			)
 		
