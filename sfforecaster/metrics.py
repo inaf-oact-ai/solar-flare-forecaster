@@ -1003,7 +1003,7 @@ def single_label_metrics(predictions, labels, target_names=None, chunk_size=64, 
 	  
 	return metrics
 
-def build_single_label_metrics(target_names, chunk_size, compute_best_tss, compute_metrics_vs_thr):
+def build_single_label_metrics(target_names, chunk_size, compute_best_tss, compute_metrics_vs_thr, binary_thr):
 
 	def compute_single_label_metrics(p: EvalPrediction):
 		""" Compute metrics """
@@ -1012,6 +1012,7 @@ def build_single_label_metrics(target_names, chunk_size, compute_best_tss, compu
 		nonlocal chunk_size
 		nonlocal compute_best_tss
 		nonlocal compute_metrics_vs_thr
+		nonlocal binary_thr
 		
 		# - Compute all metrics
 		metrics = single_label_metrics(
@@ -1020,7 +1021,8 @@ def build_single_label_metrics(target_names, chunk_size, compute_best_tss, compu
 			target_names=target_names,
 			chunk_size=chunk_size,
 			compute_best_tss=compute_best_tss,
-			compute_metrics_vs_thr=compute_metrics_vs_thr
+			compute_metrics_vs_thr=compute_metrics_vs_thr,
+			binary_thr=binary_thr
 		)
 		
 		# - Trainer wants only the scalar metrics
@@ -1074,13 +1076,27 @@ def build_single_label_metrics(target_names, chunk_size, compute_best_tss, compu
 					"thr_best_f1": float(metrics["thr_best_f1"]),
 					"thr_best_tss": float(metrics["thr_best_tss"]),
 					"thr_best_precrec": float(metrics["thr_best_precrec"]),
-					"precision_best_precrec": float(metrics["precision_best_precrec"]),
-					"recall_best_precrec": float(metrics["recall_best_precrec"]),
-					"f1_best_precrec": float(metrics["f1_best_precrec"]),
-					"tss_best_precrec": float(metrics["tss_best_precrec"]),
-					"hss_best_precrec": float(metrics["hss_best_precrec"]),
-					"mcc_best_precrec": float(metrics["mcc_best_precrec"]),
-					"apss_best_precrec": float(metrics["apss_best_precrec"]),
+					"precision_at_best_precrec": float(metrics["precision_at_best_precrec"]),
+					"recall_at_best_precrec": float(metrics["recall_at_best_precrec"]),
+					"f1_at_best_precrec": float(metrics["f1_at_best_precrec"]),
+					"tss_at_best_precrec": float(metrics["tss_at_best_precrec"]),
+					"hss_at_best_precrec": float(metrics["hss_at_best_precrec"]),
+					"mcc_at_best_precrec": float(metrics["mcc_at_best_precrec"]),
+					"apss_at_best_precrec": float(metrics["apss_at_best_precrec"]),
+					"precision_at_best_tss": float(metrics["precision_at_best_tss"]),
+					"recall_at_best_tss": float(metrics["recall_at_best_tss"]),
+					"f1_at_best_tss": float(metrics["f1_at_best_tss"]),
+					"tss_at_best_tss": float(metrics["tss_at_best_tss"]),
+					"hss_at_best_tss": float(metrics["hss_at_best_tss"]),
+					"mcc_at_best_tss": float(metrics["mcc_at_best_tss"]),
+					"apss_at_best_tss": float(metrics["apss_at_best_tss"]),
+					"precision_at_best_f1": float(metrics["precision_at_best_f1"]),
+					"recall_at_best_f1": float(metrics["recall_at_best_f1"]),
+					"f1_at_best_f1": float(metrics["f1_at_best_f1"]),
+					"tss_at_best_f1": float(metrics["tss_at_best_f1"]),
+					"hss_at_best_f1": float(metrics["hss_at_best_f1"]),
+					"mcc_at_best_f1": float(metrics["mcc_at_best_f1"]),
+					"apss_at_best_f1": float(metrics["apss_at_best_f1"]),				
 				}
 			)
 		
