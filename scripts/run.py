@@ -1134,7 +1134,8 @@ def save_curves_csv_from_predictions(
 ##################
 def run_test(
 	trainer,
-	dataset
+	dataset,
+	args
 ):
 	""" Run test """
 	
@@ -1785,7 +1786,7 @@ def main():
 	# - Run predict on test set
 	if args.test:
 		logger.info("Predict model on input data %s ..." % (args.datalist))
-		run_test(trainer, dataset)
+		run_test(trainer, dataset, args)
 	
 	################################
 	##    RUN PREDICT
