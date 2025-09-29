@@ -932,26 +932,34 @@ def single_label_metrics(predictions, labels, target_names=None, chunk_size=64, 
 			best_thr_f1  = float(thr[i_f1])
 			best_thr_precrec   = float(thr[i_precrec])
 			
-			prec_at_best_precrec= float(prec[i_precrec])
-			rec_at_best_precrec= float(rec[i_precrec])
-			f1_at_best_precrec= float(f1[i_precrec])
-			tss_at_best_precrec= float(tss[i_precrec])
-			hss_at_best_precrec= float(hss[i_precrec])
-			mcc_at_best_precrec= float(mcc[i_precrec])
-			apss_at_best_precrec= float(apss[i_precrec])
-			bss_at_best_precrec= float(bss[i_precrec])
-			
 			metrics.update({
-				"thr_best_tss": best_thr_tss,
-				"thr_best_f1": best_thr_f1,
-				"thr_best_precrec": best_thr_precrec,
-				"precision_best_precrec": prec_at_best_precrec,
-				"recall_best_precrec": rec_at_best_precrec,
-				"f1_best_precrec": f1_at_best_precrec,
-				"tss_best_precrec": tss_at_best_precrec,
-				"hss_best_precrec": hss_at_best_precrec,
-				"mcc_best_precrec": mcc_at_best_precrec,
-				"apss_best_precrec": apss_at_best_precrec
+				"thr_best_tss": float(thr[i_tss]),
+				"thr_best_f1": float(thr[i_f1]),
+				"thr_best_precrec": float(thr[i_precrec]),
+				
+				"precision_at_best_precrec": float(prec[i_precrec]),
+				"recall_at_best_precrec": float(rec[i_precrec]),
+				"f1_at_best_precrec": float(f1[i_precrec]),
+				"tss_at_best_precrec": float(tss[i_precrec]),
+				"hss_at_best_precrec": float(hss[i_precrec]),
+				"mcc_at_best_precrec": float(mcc[i_precrec]),
+				"apss_at_best_precrec": float(apss[i_precrec]),
+				
+				"precision_at_best_tss": float(prec[i_tss]),
+				"recall_at_best_tss":    float(rec[i_tss]),
+				"f1_at_best_tss":  float(f1[i_tss]),
+				"tss_at_best_tss": float(tss[i_tss]),
+				"hss_at_best_tss": float(hss[i_tss]),
+				"mcc_at_best_tss": float(mcc[i_tss]),
+				"apss_at_best_tss": float(apss[i_tss]),
+				
+				"precision_at_best_f1": float(prec[i_f1]),
+				"recall_at_best_f1":    float(rec[i_f1]),
+    		"f1_at_best_f1":    float(f1[i_f1]),
+				"tss_at_best_f1": float(tss[i_f1]),
+				"hss_at_best_f1": float(hss[i_f1]),
+				"mcc_at_best_f1": float(mcc[i_f1]),
+    		"apss_at_best_f1": float(apss[i_f1]),
 			})
 		
 		# - Compute individual class metrics for the binary case
