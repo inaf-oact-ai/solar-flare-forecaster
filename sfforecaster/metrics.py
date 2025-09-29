@@ -682,7 +682,7 @@ def single_label_metrics(predictions, labels, target_names=None, chunk_size=64, 
 		prob_pos_class= probs[:, 1].numpy()
 		y_pred = (prob_pos_class >= float(binary_thr)).astype(np.int64)
 	else:
-    y_pred = torch.argmax(probs, dim=1).numpy()
+		y_pred = torch.argmax(probs, dim=1).numpy()
     
 	# - Finally, compute metrics
 	#   Ensure labels are NumPy array
