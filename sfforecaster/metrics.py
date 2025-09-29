@@ -507,7 +507,14 @@ def binary_curves_from_probs(
 	idx_best_mcc = int(np.nanargmax(mcc))
 	
 	# “crossing” of precision and recall (closest point)
-	idx_cross = int(np.nanargmin(np.abs(prec - rec)))
+	##idx_cross = int(np.nanargmin(np.abs(prec - rec)))
+	diff = np.abs(prec - rec)
+	valid = (prec > 0) & (rec > 0)   # exclude trivial points with no true positives
+	if np.any(valid):
+		idx_cross = int(np.where(valid)[0][np.nanargmin(diff[valid])])
+	else:
+		idx_cross = int(np.nanargmax(f1))  # safe fallback (often near P≈R anyway)
+	
 
 	def _counts_at(idx: int):
 		y_pred = (p_pos >= thresholds[idx]).astype(np.int64)
