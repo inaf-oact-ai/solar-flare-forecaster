@@ -60,6 +60,7 @@ from sfforecaster.trainer import VideoDataCollator, ImgDataCollator, TSDataColla
 from sfforecaster.model import CoralOrdinalHead
 from sfforecaster.inference import coral_logits_to_class_probs, coral_decode_with_thresholds
 from sfforecaster.inference import load_img_for_inference, load_video_for_inference, load_ts_for_inference
+from sfforecaster.metrics import binary_curves_from_probs
 
 from sfforecaster import logger
 
@@ -256,6 +257,7 @@ def get_args():
 	#parser.set_defaults(save_model_every_epoch=False)
 	parser.add_argument('-max_checkpoints', '--max_checkpoints', dest='max_checkpoints', required=False, type=int, default=2, action='store',help='Max number of saved checkpoints (default=2)')
 	parser.add_argument('-outfile','--outfile', dest='outfile', required=False, default="classifier_results.json", type=str, help='Output file with saved inference results') 
+	parser.add_argument("--save_metric_curves", action="store_true", help="If set, save precision/recall/F1/TSS/HSS/MCC/ApSS vs threshold to CSV for eval and test.")
 	
 	# - Parse arguments
 	#   NB: Accept unknown args so launchers can't break
@@ -1060,6 +1062,72 @@ def load_training_opts(args):
 	print(training_opts)		
 			
 	return training_opts		
+
+##########################
+##  SAVE METRICS CURVE
+##########################
+def save_curves_csv_from_predictions(
+	trainer, 
+	dataset, 
+	outfile_csv: str, 
+	num_ticks: int = 1001
+):
+	"""
+		Uses trainer.predict(dataset) to get logits & labels, builds curves via metrics.binary_curves_from_probs,
+		and writes curves to CSV. Writes BSS as a one-line sidecar .bss.txt file.
+	"""
+	# Predict to get logits & labels
+	pred_out = trainer.predict(dataset)
+	logits = torch.as_tensor(pred_out.predictions)
+	if logits.ndim == 1:
+		logits = logits.view(-1, 1)
+
+	# Build positive-class probabilities
+	if logits.shape[1] == 1:
+		p_pos = torch.sigmoid(logits).squeeze(1).cpu().numpy()
+	else:
+		p = torch.softmax(logits, dim=1)
+		p_pos = p[:, 1].detach().cpu().numpy()
+
+	y_true = np.asarray(pred_out.label_ids, dtype=np.int64)
+
+	curves = binary_curves_from_probs(
+		p_pos=p_pos,
+		y_true=y_true,
+		num_ticks=num_ticks,
+	)
+
+	thresholds = curves["thresholds"]
+	precision  = curves["precision"]
+	recall     = curves["recall"]
+	f1         = curves["f1"]
+	tss        = curves["tss"]
+	hss        = curves["hss"]
+	mcc        = curves["mcc"]
+	apss       = curves["apss"]
+	
+	os.makedirs(os.path.dirname(outfile_csv), exist_ok=True)
+
+	# Write CSV
+	with open(outfile_csv, "w", newline="") as f:
+		w = csv.writer(f)
+		w.writerow(["threshold", "precision", "recall", "f1", "tss", "hss", "mcc", "apss"])
+		for i in range(len(thresholds)):
+			w.writerow([
+				float(thresholds[i]),
+				float(precision[i]),
+				float(recall[i]),
+				float(f1[i]),
+				float(tss[i]),
+				float(hss[i]),
+				float(mcc[i]),
+				float(apss[i]),
+			])
+
+	# Save BSS alongside (single number)
+	#with open(outfile_csv.replace(".csv", ".bss.txt"), "w") as f:
+	#	f.write(f"BSS={bss:.6f}\n")
+
 			
 ##################
 ##   RUN TEST   ##
@@ -1087,7 +1155,13 @@ def run_test(
 		
 	trainer.log_metrics("predict", metrics)
 	trainer.save_metrics("predict", metrics)			
-			
+
+	# - Save metric curves			
+	if args.compute_metrics_vs_thr and args.save_metric_curves:
+		out_csv = os.path.join(args.output_dir, "metrics_curves.csv")
+		logger.info(f"Saving metric curves to {out_csv} ...")	
+		save_curves_csv_from_predictions(trainer, dataset, out_csv, num_ticks=1001)
+    	
 		
 ##############################
 ##     RUN PREDICT
@@ -1372,7 +1446,7 @@ def run_train(
 		
 		print("--> eval metrics")
 		print(metrics) 		
-			
+				
 ##############
 ##   MAIN   ##
 ##############
