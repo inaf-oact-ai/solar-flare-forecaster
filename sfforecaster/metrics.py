@@ -659,7 +659,7 @@ def build_multi_label_metrics(target_names):
 ###########################################
 ##   SINGLE-LABEL CLASS METRICS
 ###########################################
-def single_label_metrics(predictions, labels, target_names=None, chunk_size=64, compute_best_tss=False, compute_metrics_vs_thr=False):
+def single_label_metrics(predictions, labels, target_names=None, chunk_size=64, compute_best_tss=False, compute_metrics_vs_thr=False, binary_thr=None):
 	""" Helper function to compute single label metrics """
 	
 	# - First, apply sigmoid on predictions which are of shape (batch_size, num_labels)
@@ -675,12 +675,15 @@ def single_label_metrics(predictions, labels, target_names=None, chunk_size=64, 
 		p_pos = torch.sigmoid(preds_t)             # (B,1)
 		probs = torch.cat([1.0 - p_pos, p_pos], 1) # (B,2)
 	else:
-		probs = torch.softmax(preds_t, dim=1)	
-	
+		probs = torch.softmax(preds_t, dim=1)
+		
 	# - Next, use threshold to turn them into integer predictions
-	#y_pred= np.argmax(probs, axis=1)
-	y_pred = torch.argmax(probs, dim=1).numpy()
-	
+	if probs.shape[1] == 2 and binary_thr is not None:
+		prob_pos_class= probs[:, 1].numpy()
+    y_pred = (prob_pos_class >= float(binary_thr)).astype(np.int64)
+	else:
+    y_pred = torch.argmax(probs, dim=1).numpy()
+    
 	# - Finally, compute metrics
 	#   Ensure labels are NumPy array
 	#y_true = np.where(labels==1)[1]
