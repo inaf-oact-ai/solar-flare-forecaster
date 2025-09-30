@@ -1608,7 +1608,7 @@ def main():
 	chunk_size= training_opts.per_device_train_batch_size if dataset_cv is None else training_opts.per_device_eval_batch_size
 	binary_thr= None if args.binary_thr==0.5 else args.binary_thr
 	out_csv= None
-	if args.compute_metrics_vs_thr and args.save_metric_curves:
+	if args.save_metric_curves:
 		out_csv = os.path.join(args.outdir, "metrics_curves.csv")
 	
 	# - Set metrics
