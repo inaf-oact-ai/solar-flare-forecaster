@@ -24,6 +24,7 @@ def get_args():
 
 	parser.add_argument('-inputfiles','--inputfiles', dest='inputfiles', required=True, type=str, help='Input data metric files separated by commas') 
 	parser.add_argument('-min_recall', '--min_recall', dest='min_recall', required=False, type=float, default=0.3, action='store', help='Min recall filter (default=0.3)')
+	parser.add_argument('-min_precision', '--min_precision', dest='min_precision', required=False, type=float, default=0.1, action='store', help='Min precision filter (default=0.3)')
 	parser.add_argument('-penalty_std', '--penalty_std', dest='penalty_std', required=False, type=float, default=0.05, action='store', help='Penalty std parameter (default=0.05)')
 		
 	args, _unknown = parser.parse_known_args()
@@ -145,6 +146,7 @@ def main():
 	tau_star, info = consensus_tau_from_curve_csvs(
 		filenames, 
 		min_recall=args.min_recall, 
+		min_precision=args.min_precision,
 		penalty_std=args.penalty_std
 	)
 	
