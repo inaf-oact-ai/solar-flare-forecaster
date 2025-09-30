@@ -108,6 +108,7 @@ def consensus_tau_from_curve_csvs(
         valid &= (mean["precision"] >= float(min_precision))
     if not np.any(valid):
         # if constraints impossible, relax them
+        print("WARNING: No contraint satisfied, relaxing all of them...")
         valid[:] = True
 
     # stability-aware score: mean TSS minus λ * std(TSS)
