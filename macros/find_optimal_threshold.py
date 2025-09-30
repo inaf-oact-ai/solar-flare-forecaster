@@ -78,6 +78,12 @@ def consensus_tau_from_curve_csvs(
 
     mean = {m: wmean(X[m]) for m in metrics}                       # (T,)
     std  = {m: X[m].std(axis=0, ddof=1) if R > 1 else np.zeros_like(grid)}
+    
+    print("mean")
+    print(mean)
+    
+    print("std")
+    print(std)
 
     # optional constraints
     valid = np.ones_like(grid, dtype=bool)
