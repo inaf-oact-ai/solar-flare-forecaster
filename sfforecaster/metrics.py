@@ -976,7 +976,7 @@ def single_label_metrics(predictions, labels, target_names=None, chunk_size=64, 
 				with open(curves_csv_path, "w", newline="") as f:
 					w = csv.writer(f)
 					w.writerow(["threshold","precision","recall","f1","tss","hss","mcc","apss"])
-					for i in range(len(thresholds)):
+					for i in range(len(thr)):
 						w.writerow([
 							float(thr[i]),
 							float(prec[i]),
