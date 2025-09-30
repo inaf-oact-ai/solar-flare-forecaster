@@ -11,6 +11,7 @@ import os
 import random
 import numpy as np
 import re
+import csv
 from copy import deepcopy
 from typing import Dict, Any, Optional
 
@@ -666,7 +667,7 @@ def build_multi_label_metrics(target_names):
 ###########################################
 ##   SINGLE-LABEL CLASS METRICS
 ###########################################
-def single_label_metrics(predictions, labels, target_names=None, chunk_size=64, compute_best_tss=False, compute_metrics_vs_thr=False, binary_thr=None):
+def single_label_metrics(predictions, labels, target_names=None, chunk_size=64, compute_best_tss=False, compute_metrics_vs_thr=False, binary_thr=None, curves_csv_path=None):
 	""" Helper function to compute single label metrics """
 	
 	# - First, apply sigmoid on predictions which are of shape (batch_size, num_labels)
@@ -968,6 +969,24 @@ def single_label_metrics(predictions, labels, target_names=None, chunk_size=64, 
 				"mcc_at_best_f1": float(mcc[i_f1]),
     		"apss_at_best_f1": float(apss[i_f1]),
 			})
+			
+			# - Save metric curves to CSV?
+			if curves_csv_path:
+				os.makedirs(os.path.dirname(curves_csv_path), exist_ok=True)
+				with open(curves_csv_path, "w", newline="") as f:
+					w = csv.writer(f)
+					w.writerow(["threshold","precision","recall","f1","tss","hss","mcc","apss"])
+					for i in range(len(thresholds)):
+						w.writerow([
+							float(thr[i]),
+							float(prec[i]),
+							float(rec[i]),
+							float(f1[i]),
+							float(tss[i]),
+							float(hss[i]),
+							float(mcc[i]),
+							float(apss[i]),
+						])
 		
 		# - Compute individual class metrics for the binary case
 		# class1 = "positive" (the second label in label_indices / confusion matrix)
@@ -1010,7 +1029,7 @@ def single_label_metrics(predictions, labels, target_names=None, chunk_size=64, 
 	  
 	return metrics
 
-def build_single_label_metrics(target_names, chunk_size, compute_best_tss, compute_metrics_vs_thr, binary_thr):
+def build_single_label_metrics(target_names, chunk_size, compute_best_tss, compute_metrics_vs_thr, binary_thr, curves_csv_path):
 
 	def compute_single_label_metrics(p: EvalPrediction):
 		""" Compute metrics """
@@ -1020,6 +1039,7 @@ def build_single_label_metrics(target_names, chunk_size, compute_best_tss, compu
 		nonlocal compute_best_tss
 		nonlocal compute_metrics_vs_thr
 		nonlocal binary_thr
+		nonlocal curves_csv_path
 		
 		# - Compute all metrics
 		metrics = single_label_metrics(
@@ -1029,7 +1049,8 @@ def build_single_label_metrics(target_names, chunk_size, compute_best_tss, compu
 			chunk_size=chunk_size,
 			compute_best_tss=compute_best_tss,
 			compute_metrics_vs_thr=compute_metrics_vs_thr,
-			binary_thr=binary_thr
+			binary_thr=binary_thr,
+			curves_csv_path=curves_csv_path
 		)
 		
 		# - Trainer wants only the scalar metrics
