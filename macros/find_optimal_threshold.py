@@ -76,14 +76,28 @@ def consensus_tau_from_curve_csvs(
     def wmean(A):  # A: (R, T)
         return np.tensordot(w, A, axes=(0, 0))
 
+    # --- MEAN over runs for *all* metrics present in X
     mean = {m: wmean(X[m]) for m in metrics}                       # (T,)
-    std  = {m: X[m].std(axis=0, ddof=1) if R > 1 else np.zeros_like(grid)}
+    
+    # --- STD over runs for the *same* metrics; zeros if only one run
+    std = {}
+    for m in X:
+        if X[m].shape[0] > 1:
+            std[m] = X[m].std(axis=0, ddof=1)
+        else:
+            std[m] = np.zeros_like(mean[m])
     
     print("mean")
     print(mean)
     
     print("std")
     print(std)
+     
+    # Ensure 'tss' exists in both; if not, fall back gracefully
+    if "tss" not in mean:
+        raise KeyError("TSS not found in aggregated curves; check CSV headers/columns.")
+    if "tss" not in std:
+        std["tss"] = np.zeros_like(mean["tss"])
 
     # optional constraints
     valid = np.ones_like(grid, dtype=bool)
