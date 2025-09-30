@@ -131,7 +131,7 @@ def main():
 	print("Consensus τ* =", tau_star)
 	print(info)
     
-  return 0
+	return 0
 		
 ###################
 ##   MAIN EXEC   ##
