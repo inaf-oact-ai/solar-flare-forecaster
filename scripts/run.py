@@ -353,11 +353,11 @@ def load_image_model_vit(
 			in_features = model.classifier.in_features
 			model.classifier = torch.nn.Linear(in_features, 1)
 			model.config.num_labels = 1  # avoid confusion; we’ll provide our own loss
-			model.config.problem_type = None  # don't let HF pick MSE; we handle loss in Trainer	
+			model.config.problem_type = None  # don't let HF pick MSE; we handle loss in Trainer
 					
 		# - Add dropout layer?
 		if args.head_dropout > 0.0 and hasattr(model, "classifier"):
-			logger.info("Adding dropout layer in classifier head ...")	
+			logger.info("Adding dropout layer in classifier head ...")
 			in_features = model.classifier.in_features
 			out_features = 1 if args.binary else num_labels
 			model.classifier = torch.nn.Sequential(
@@ -665,8 +665,8 @@ def load_ts_model(
 	if args.ordinal:
 		raise ValueError("Ordinal head not yet implemented for time series data!")
  
- 	# - Add dropout?
- 	if not inference_mode and args.head_dropout > 0.0:
+	# - Add dropout?
+	if not inference_mode and args.head_dropout > 0.0:
 		hidden_size = model.config.hidden_size
 		out_features = model.config.num_labels
 		logger.info(f"Adding dropout {args.head_dropout} before classifier head ...")
