@@ -623,6 +623,7 @@ class ImageFeatTSClassifier(torch.nn.Module):
 		max_img_freeze_layer_id: int = -1,
 		trust_remote_code: bool = True,
 		layernorm_eps: float = 1e-6,
+		head_dropout: float = 0.0
 	):
 		super().__init__()
 		assert patching_mode in ("time_only", "time_variate")
@@ -637,6 +638,7 @@ class ImageFeatTSClassifier(torch.nn.Module):
 		self.max_img_freeze_layer_id= max_img_freeze_layer_id
 		self.freeze_backbone = freeze_backbone
 		self.max_freeze_layer_id= max_freeze_layer_id
+		self.dropout = torch.nn.Dropout(p=head_dropout)
 		
 		# - Create image encoder
 		self.image_enc= ImageEncoderWrapper(
@@ -1001,11 +1003,13 @@ class ImageFeatTSClassifier(torch.nn.Module):
 		den = weights.sum(dim=1, keepdim=True).clamp_min(1.0)
 		pooled = (reprs * weights.unsqueeze(-1)).sum(dim=1) / den   # [B, D_repr]
 
+
 		# 6) lazy classifier
 		if (self.classifier is None) or (self.classifier.in_features != pooled.size(-1)):
 			self.classifier = torch.nn.Linear(pooled.size(-1), self.num_labels).to(pooled.device)
 
-		logits = self.classifier(pooled)                         # [B, num_labels]
+		#logits = self.classifier(pooled)                         # [B, num_labels]
+		logits = self.classifier(self.dropout(pooled))
 		
 		return SequenceClassifierOutput(logits=logits)
 		

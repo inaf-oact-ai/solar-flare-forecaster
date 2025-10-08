@@ -190,6 +190,9 @@ def get_args():
 	parser.add_argument('--drop_last', dest='drop_last', action='store_true',help='Drop last incomplete batch (default=false)')	
 	parser.set_defaults(drop_last=False)
 	
+	parser.add_argument('-weight_decay','--weight_decay', dest='weight_decay', type=float, default=0.0, help='AdamW weight decay (default=0.0)')
+	parser.add_argument('--head_dropout', dest='head_dropout', type=float, default=0.0, help='Dropout prob before classifier heads (default=0.0)')
+                    
 	parser.add_argument('--ddp_find_unused_parameters', dest='ddp_find_unused_parameters', action='store_true', help='Flag passed to DistributedDataParallel when using distributed training (default=false)')	
 	parser.set_defaults(ddp_find_unused_parameters=False)
 	parser.add_argument('--fp16', dest='fp16', action='store_true', help='Enable fp16 (default=false)')	
@@ -351,7 +354,16 @@ def load_image_model_vit(
 			model.classifier = torch.nn.Linear(in_features, 1)
 			model.config.num_labels = 1  # avoid confusion; we’ll provide our own loss
 			model.config.problem_type = None  # don't let HF pick MSE; we handle loss in Trainer	
-				
+					
+		# - Add dropout layer?
+		if args.head_dropout > 0.0 and hasattr(model, "classifier"):
+			logger.info("Adding dropout layer in classifier head ...")	
+			in_features = model.classifier.in_features
+			out_features = 1 if args.binary else num_labels
+			model.classifier = torch.nn.Sequential(
+				torch.nn.Dropout(p=args.head_dropout),
+				torch.nn.Linear(in_features, out_features)
+			)	
 				
 	# - Load processor	
 	image_processor = ViTImageProcessor.from_pretrained(args.model)
@@ -397,6 +409,16 @@ def load_image_model_auto(
 					id2label=id2label, 
 					label2id=label2id,
 					num_labels=num_labels
+				)
+			
+			# - Use dropout?	
+			if args.head_dropout > 0.0 and hasattr(model, "classifier"):
+				logger.info("Adding dropout layer in classifier head ...")
+				in_features = model.classifier.in_features
+				out_features = 1 if args.binary else num_labels
+				model.classifier = torch.nn.Sequential(
+					torch.nn.Dropout(p=args.head_dropout),
+					torch.nn.Linear(in_features, out_features)
 				)
 		
 	# - Load processor	
@@ -489,6 +511,17 @@ def load_videomae_model(
 			model.config.num_labels = head_numout
 			model.config.problem_type = None
 	
+		# - Add dropout layer?
+		if args.head_dropout > 0.0 and hasattr(model, "classifier"):
+			logger.info("Adding dropout layer in classifier head ...")
+			in_features = model.classifier.in_features
+			out_features = model.config.num_labels
+			model.classifier = torch.nn.Sequential(
+				torch.nn.Dropout(p=args.head_dropout),
+				torch.nn.Linear(in_features, out_features)
+			)
+	
+	
 	# - Load processor
 	image_processor = VideoMAEImageProcessor.from_pretrained(args.model)
 	
@@ -532,6 +565,7 @@ def load_imgfeatts_model(
 		max_freeze_layer_id=args.ts_max_freeze_layer_id,
 		freeze_img_backbone=args.freeze_backbone,
 		max_img_freeze_layer_id=args.max_freeze_layer_id,
+		head_dropout=args.head_dropout,
 	)
 	
 	image_processor = model.image_processor
@@ -631,6 +665,16 @@ def load_ts_model(
 	if args.ordinal:
 		raise ValueError("Ordinal head not yet implemented for time series data!")
  
+ 	# - Add dropout?
+ 	if not inference_mode and args.head_dropout > 0.0:
+		hidden_size = model.config.hidden_size
+		out_features = model.config.num_labels
+		logger.info(f"Adding dropout {args.head_dropout} before classifier head ...")
+		model.classifier = nn.Sequential(
+			torch.nn.Dropout(p=args.head_dropout),
+			torch.nn.Linear(hidden_size, out_features)
+		)
+
   # - Inference?
 	if inference_mode:
 	  # - Load trained checkpoint (weights + config)
@@ -1056,6 +1100,7 @@ def load_training_opts(args):
 		ddp_find_unused_parameters=args.ddp_find_unused_parameters,
 		fp16=args.fp16,
 		bf16=args.bf16,
+		weight_decay=args.weight_decay,
 	)
 	
 	print("--> training options")
