@@ -322,12 +322,27 @@ def load_image_model_vit(
 ):
 	""" Load image model & processor (ViT loader version) """
 
-	# - Load model
 	if inference_mode:
+		# - Load model for inference
 		model= ViTForImageClassification.from_pretrained(args.model)
+		
+		# Ensure head matches the checkpoint if it was trained with Dropout+Linear
+		try:
+			state = load_state_dict_any(args.model)  # works with checkpoint dir or .bin/.safetensors
+			needs_seq_head = any(k.startswith("classifier.1.") for k in state.keys())
+			has_plain_linear = hasattr(model, "classifier") and isinstance(model.classifier, torch.nn.Linear)
+			if needs_seq_head and has_plain_linear:
+				p = getattr(getattr(model, "config", object()), "head_dropout", args.head_dropout)
+				maybe_wrap_classifier_with_dropout(model, p)
+				# reload so classifier.* weights map correctly
+				model.load_state_dict(state, strict=False)
+		except Exception as e:
+			logger.warning(f"Classifier head alignment skipped (non-fatal): {e}")
+		
 		model.eval()
 		
 	else:
+		# - Load model for training
 		if args.binary:
 			config= ViTConfig.from_pretrained(
 				args.model,
@@ -348,22 +363,29 @@ def load_image_model_vit(
 			config=config
 		)
 		
+		# - Replace the head with 1 logit for binary class
 		if args.binary:
-			# - Replace the head with 1 logit
 			in_features = model.classifier.in_features
 			model.classifier = torch.nn.Linear(in_features, 1)
 			model.config.num_labels = 1  # avoid confusion; we’ll provide our own loss
 			model.config.problem_type = None  # don't let HF pick MSE; we handle loss in Trainer
 					
-		# - Add dropout layer?
-		if args.head_dropout > 0.0 and hasattr(model, "classifier"):
-			logger.info("Adding dropout layer in classifier head ...")
-			in_features = model.classifier.in_features
-			out_features = 1 if args.binary else num_labels
-			model.classifier = torch.nn.Sequential(
-				torch.nn.Dropout(p=args.head_dropout),
-				torch.nn.Linear(in_features, out_features)
-			)	
+		# - Add dropout layer in architecture and config?
+		maybe_wrap_classifier_with_dropout(
+			model, args.head_dropout, num_out=(1 if args.binary else num_labels)
+		)
+		if hasattr(model, "config"):
+			setattr(model.config, "head_dropout", float(args.head_dropout))	
+			
+		#if args.head_dropout > 0.0 and hasattr(model, "classifier"):
+		#	logger.info("Adding dropout layer in classifier head ...")
+		#	in_features = model.classifier.in_features
+		#	out_features = 1 if args.binary else num_labels
+		#	model.classifier = torch.nn.Sequential(
+		#		torch.nn.Dropout(p=args.head_dropout),
+		#		torch.nn.Linear(in_features, out_features)
+		#	)	
+		
 				
 	# - Load processor	
 	image_processor = ViTImageProcessor.from_pretrained(args.model)
@@ -382,15 +404,32 @@ def load_image_model_auto(
 	""" Load image model & processor (AutoModelForImageClassification loader version) """
 
 	if inference_mode:
+		# - Load model for inference
 		model = AutoModelForImageClassification.from_pretrained(args.model)
+		
+		# - Ensure head matches the checkpoint if it was trained with Dropout+Linear
+		try:
+			state = load_state_dict_any(args.model)  # works with checkpoint dir or .bin/.safetensors
+			needs_seq_head = any(k.startswith("classifier.1.") for k in state.keys())
+			has_plain_linear = hasattr(model, "classifier") and isinstance(model.classifier, torch.nn.Linear)
+			if needs_seq_head and has_plain_linear:
+				p = getattr(getattr(model, "config", object()), "head_dropout", args.head_dropout)
+				maybe_wrap_classifier_with_dropout(model, p)
+				# reload so classifier.* weights map correctly
+				model.load_state_dict(state, strict=False)
+		except Exception as e:
+			logger.warning(f"Classifier head alignment skipped (non-fatal): {e}")
+		
 		model.eval()
+		
 	else:
-		# - Load ordinal-head model
+		# - Load model for training
 		if args.ordinal:
+			# - Load ordinal-head model
 			model= load_ordinal_image_model(args, nclasses)
 		
-		# - Load standard-head model
 		else:
+			# - Load standard-head model
 			if args.binary:		
 				# - Load standard tmp model
 				model = AutoModelForImageClassification.from_pretrained(args.model, num_labels=2)  # temp
@@ -411,15 +450,20 @@ def load_image_model_auto(
 					num_labels=num_labels
 				)
 			
-			# - Use dropout?	
-			if args.head_dropout > 0.0 and hasattr(model, "classifier"):
-				logger.info("Adding dropout layer in classifier head ...")
-				in_features = model.classifier.in_features
-				out_features = 1 if args.binary else num_labels
-				model.classifier = torch.nn.Sequential(
-					torch.nn.Dropout(p=args.head_dropout),
-					torch.nn.Linear(in_features, out_features)
-				)
+			# - Add dropout in architecture & config?	
+			maybe_wrap_classifier_with_dropout(
+				model, args.head_dropout, num_out=(1 if args.binary else num_labels)
+			)
+			if hasattr(model, "config"):
+				setattr(model.config, "head_dropout", float(args.head_dropout))
+			#if args.head_dropout > 0.0 and hasattr(model, "classifier"):
+			#	logger.info("Adding dropout layer in classifier head ...")
+			#	in_features = model.classifier.in_features
+			#	out_features = 1 if args.binary else num_labels
+			#	model.classifier = torch.nn.Sequential(
+			#		torch.nn.Dropout(p=args.head_dropout),
+			#		torch.nn.Linear(in_features, out_features)
+			#	)
 		
 	# - Load processor	
 	image_processor = AutoImageProcessor.from_pretrained(args.model)
@@ -477,12 +521,28 @@ def load_videomae_model(
 ):
 	""" Load video model & processor """
 	
-	# - Load model
+	
 	if inference_mode:
+		# - Load model for inference
 		model = VideoMAEForVideoClassification.from_pretrained(args.model)
+		
+		# - Ensure head matches the checkpoint if it was trained with Dropout+Linear
+		try:
+			state = load_state_dict_any(args.model)  # works with checkpoint dir or .bin/.safetensors
+			needs_seq_head = any(k.startswith("classifier.1.") for k in state.keys())
+			has_plain_linear = hasattr(model, "classifier") and isinstance(model.classifier, torch.nn.Linear)
+			if needs_seq_head and has_plain_linear:
+				p = getattr(getattr(model, "config", object()), "head_dropout", args.head_dropout)
+				maybe_wrap_classifier_with_dropout(model, p)
+				# reload so classifier.* weights map correctly
+				model.load_state_dict(state, strict=False)
+		except Exception as e:
+			logger.warning(f"Classifier head alignment skipped (non-fatal): {e}")
+			
 		model.eval()
 		
 	else:
+		# - Load model for training
 		try:
 			if args.binary:
 				model = VideoMAEForVideoClassification.from_pretrained(args.model, num_labels=1) # tmp
@@ -511,17 +571,22 @@ def load_videomae_model(
 			model.config.num_labels = head_numout
 			model.config.problem_type = None
 	
-		# - Add dropout layer?
-		if args.head_dropout > 0.0 and hasattr(model, "classifier"):
-			logger.info("Adding dropout layer in classifier head ...")
-			in_features = model.classifier.in_features
-			out_features = model.config.num_labels
-			model.classifier = torch.nn.Sequential(
-				torch.nn.Dropout(p=args.head_dropout),
-				torch.nn.Linear(in_features, out_features)
-			)
+		# - Add dropout layer in architecture and config?
+		maybe_wrap_classifier_with_dropout(
+			model, args.head_dropout, num_out=(1 if args.binary else num_labels)
+		)
+		if hasattr(model, "config"):
+			setattr(model.config, "head_dropout", float(args.head_dropout))	
+		#if args.head_dropout > 0.0 and hasattr(model, "classifier"):
+		#	logger.info("Adding dropout layer in classifier head ...")
+		#	in_features = model.classifier.in_features
+		#	out_features = model.config.num_labels
+		#	model.classifier = torch.nn.Sequential(
+		#		torch.nn.Dropout(p=args.head_dropout),
+		#		torch.nn.Linear(in_features, out_features)
+		#	)
 	
-	
+		
 	# - Load processor
 	image_processor = VideoMAEImageProcessor.from_pretrained(args.model)
 	
@@ -568,6 +633,11 @@ def load_imgfeatts_model(
 		head_dropout=args.head_dropout,
 	)
 	
+	# - Add head_dropout option in config
+	if hasattr(model, "config"):
+		setattr(model.config, "head_dropout", float(args.head_dropout))
+		
+	# - Get image processor
 	image_processor = model.image_processor
 	
 	# - Ordinal variant (NOT IMPLEMENTED)
@@ -665,27 +735,43 @@ def load_ts_model(
 	if args.ordinal:
 		raise ValueError("Ordinal head not yet implemented for time series data!")
  
-	# - Add dropout?
-	if not inference_mode and args.head_dropout > 0.0:
-		hidden_size = model.config.hidden_size
-		out_features = model.config.num_labels
-		logger.info(f"Adding dropout {args.head_dropout} before classifier head ...")
-		model.classifier = nn.Sequential(
-			torch.nn.Dropout(p=args.head_dropout),
-			torch.nn.Linear(hidden_size, out_features)
-		)
-
+	# - Add dropout (applies to train & inference; dropout is inactive in eval)?
+	#if not inference_mode and args.head_dropout > 0.0:
+	#	hidden_size = model.config.hidden_size
+	#	out_features = model.config.num_labels
+	#	logger.info(f"Adding dropout {args.head_dropout} before classifier head ...")
+	#	model.classifier = nn.Sequential(
+	#		torch.nn.Dropout(p=args.head_dropout),
+	#		torch.nn.Linear(hidden_size, out_features)
+	#	)
+		
+	maybe_wrap_classifier_with_dropout(
+		model, args.head_dropout, num_out=model.config.num_labels
+	)	
+			
   # - Inference?
 	if inference_mode:
 	  # - Load trained checkpoint (weights + config)
 		ckpt = args.model  # can be a file OR a checkpoint dir
 		logger.info(f"Loading weights from path {args.model} ...")
 		state = load_state_dict_any(ckpt)
+		
+		# - If checkpoint expects Sequential(Dropout, Linear) but we currently have Linear, fix head first
+		needs_seq_head = any(k.startswith("classifier.1.") for k in state.keys())
+		has_plain_linear = hasattr(model, "classifier") and isinstance(model.classifier, torch.nn.Linear)
+		if needs_seq_head and has_plain_linear:
+			p = getattr(getattr(model, "config", object()), "head_dropout", args.head_dropout)
+			maybe_wrap_classifier_with_dropout(model, p)
+		
 		missing, unexpected = model.load_state_dict(state, strict=False)
 		if missing or unexpected:
 			print(f"[load_ts_model] load_state_dict -> missing: {missing[:6]} ... | unexpected: {unexpected[:6]} ...")
 		
 		model.eval()
+		
+	# - Add head_dropout option in config
+	if hasattr(model, "config"):
+		setattr(model.config, "head_dropout", float(args.head_dropout))	
 		
 	# - No processor needed for TS (your TSDataCollator handles it)
 	ts_processor = None

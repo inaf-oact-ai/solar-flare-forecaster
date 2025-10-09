@@ -347,6 +347,25 @@ def safe_reinit_head(model: torch.nn.Module):
 			print(f"Re-initialized Conv head: {name}")
 
 
+def maybe_wrap_classifier_with_dropout(model, p: float, num_out: int | None = None):
+	"""If model.classifier is a plain Linear, wrap it as Dropout+Linear."""
+	
+	if p <= 0.0 or not hasattr(model, "classifier"):
+		return
+	
+	clf = getattr(model, "classifier")
+	if isinstance(clf, torch.nn.Sequential):
+		return  # already wrapped
+		
+	if isinstance(clf, torch.nn.Linear):
+		logger.info("Adding dropout layer in classifier head ...")
+		in_features  = clf.in_features
+		out_features = num_out if num_out is not None else clf.out_features
+		model.classifier = torch.nn.Sequential(
+			torch.nn.Dropout(p=float(p)),
+			torch.nn.Linear(in_features, out_features)
+		)
+
 ##########################
 ##     MATH UTILS
 ##########################
