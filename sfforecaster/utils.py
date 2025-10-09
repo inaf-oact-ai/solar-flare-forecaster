@@ -350,16 +350,21 @@ def safe_reinit_head(model: torch.nn.Module):
 def maybe_wrap_classifier_with_dropout(model, p: float, num_out: int | None = None):
 	"""If model.classifier is a plain Linear, wrap it as Dropout+Linear."""
 	
-	if p <= 0.0 or not hasattr(model, "classifier"):
+	if p <= 0.0:
+		print("Dropout fraction <=0, nothing to be done ...")
+		return
+		
+	if not hasattr(model, "classifier"):
+		print("Cannot access to model classifier attribute, nothing to be done ...")
 		return
 	
 	clf = getattr(model, "classifier")
 	if isinstance(clf, torch.nn.Sequential):
-		logger.info("Model classifier already wrapped with dropout layer ...")
+		print("Model classifier already wrapped with dropout layer ...")
 		return  # already wrapped
 		
 	if isinstance(clf, torch.nn.Linear):
-		logger.info("Adding dropout layer in classifier head ...")
+		print("Adding dropout layer in classifier head ...")
 		in_features  = clf.in_features
 		out_features = num_out if num_out is not None else clf.out_features
 		model.classifier = torch.nn.Sequential(
