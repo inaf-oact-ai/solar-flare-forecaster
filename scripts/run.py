@@ -738,7 +738,12 @@ def load_ts_model(
 	if args.ordinal:
 		raise ValueError("Ordinal head not yet implemented for time series data!")
  
-	# - Add dropout (applies to train & inference; dropout is inactive in eval)?
+	# - Add dropout in architecture & config (applies to train & inference; dropout is inactive in eval)?
+	maybe_wrap_classifier_with_dropout(
+		model, args.head_dropout, num_out=model.config.num_labels
+	)	
+	if hasattr(model, "config"):
+		setattr(model.config, "head_dropout", float(args.head_dropout))	
 	#if not inference_mode and args.head_dropout > 0.0:
 	#	hidden_size = model.config.hidden_size
 	#	out_features = model.config.num_labels
@@ -747,10 +752,6 @@ def load_ts_model(
 	#		torch.nn.Dropout(p=args.head_dropout),
 	#		torch.nn.Linear(hidden_size, out_features)
 	#	)
-		
-	maybe_wrap_classifier_with_dropout(
-		model, args.head_dropout, num_out=model.config.num_labels
-	)	
 			
   # - Inference?
 	if inference_mode:
@@ -771,10 +772,6 @@ def load_ts_model(
 			print(f"[load_ts_model] load_state_dict -> missing: {missing[:6]} ... | unexpected: {unexpected[:6]} ...")
 		
 		model.eval()
-		
-	# - Add head_dropout option in config
-	if hasattr(model, "config"):
-		setattr(model.config, "head_dropout", float(args.head_dropout))	
 		
 	# - No processor needed for TS (your TSDataCollator handles it)
 	ts_processor = None
