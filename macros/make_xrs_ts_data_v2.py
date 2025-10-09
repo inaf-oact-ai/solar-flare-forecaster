@@ -55,11 +55,18 @@ def parse_args():
 	p.add_argument("--events-file", required=True, type=Path)
 	p.add_argument("--satellites", nargs="+", default=["08","09","10","11","12","13","14","15","16","17","18"])
 	p.add_argument("--window-hours", type=int, default=24)
+	# NEW: sub-daily support
+	p.add_argument("--stride-hours", type=float, default=None,
+	               help="Stride between consecutive series starts in hours (default: window-hours). "
+	                    "Use 12 for twice-per-day windows, 6 for 4x per day, etc.")
+	p.add_argument("--start-align", choices=["midnight","background"], default="midnight",
+	               help="Anchor sub-daily windows at 00:00 of the background day ('midnight') "
+	                    "or at the background timestamp ('background').")
 	p.add_argument("--band", choices=["long","short"], default="long")
 	p.add_argument("--science-var", default=None)
 	p.add_argument("--background-var", default=None)
 	p.add_argument("--time-var", default=None)
-	p.add_argument("--min-coverage", type=float, default=0.95, help="Required fraction of non‑NaNs")
+	p.add_argument("--min-coverage", type=float, default=0.95, help="Required fraction of non-NaNs")
 	p.add_argument("--outdir", required=True, type=Path)
 	p.add_argument("--resample", default="1min", help="Resampling cadence of science flux data")
 	p.add_argument("--science-file-glob", default="*.nc")
@@ -114,7 +121,7 @@ def parse_args():
 	return p.parse_args()
 
 def discover_time_name(ds: xr.Dataset):
-	""" Auto‑detects variable names in a loaded xarray Dataset. Looks in ds, ds.coords, then any datetime‑like var """
+	""" Auto-detects variable names in a loaded xarray Dataset. Looks in ds, ds.coords, then any datetime-like var """
 	for n in COMMON_TIME_NAMES:
 		if n in ds or n in ds.coords:
 			return n
@@ -130,7 +137,7 @@ def discover_time_name(ds: xr.Dataset):
 	raise KeyError("Could not detect time coordinate")
 
 def discover_science_var(ds: xr.Dataset, band: str):
-	""" Auto‑detects variable names in science flux dataset. Tries common names (e.g., xrsb_flux for long band), then a regex like xrsb/xrsa """
+	""" Auto-detects variable names in science flux dataset. Tries common names (e.g., xrsb_flux for long band), then a regex like xrsb/xrsa """
 	
 	for cand in SCIENCE_NAME_CANDIDATES[band]:
 		if cand in ds:
@@ -243,28 +250,19 @@ def load_events(events_file: Path):
 	df["sev"] = df["class"].map(SEVERITY)
 	
 	# - Use peak if present; fall back to start
-	###df["t_occ"] = df["timestamp_start"] if "timestamp_start" in df.columns else df["timestamp"]
-	#df["t_occ"] = df["timestamp"]
 	df["t_occ"] = df["timestamp"].where(df["timestamp"].notna(), df["timestamp_start"])
 	df = df.dropna(subset=["t_occ"])
 	df = df[df["class"].isin(["A","B","C","M","X"])]
-	
-	###df = df[df["class"].isin(["C","M","X"])][["t_occ","class"]].sort_values("t_occ")
-	#df = df[df["class"].isin(["A","B","C","M","X"])][["t_occ","class"]].sort_values("t_occ")
     
-	# IMPORTANT: keep start/end so history channel can be built
 	return (
 		df[["t_occ", "class", "sev", "timestamp_start", "timestamp_end", "flare_type"]]
 		.sort_values("t_occ")
 		.reset_index(drop=True)
 	) 
-    
-	#return df
 	
 
-
 def choose_label(classes):
-	""" Given a list of classes inside a look‑ahead window, returns the highest severity """
+	""" Given a list of classes inside a look-ahead window, returns the highest severity """
 	if "X" in classes: return "X"
 	if "M" in classes: return "M"
 	if "C" in classes: return "C"
@@ -282,31 +280,6 @@ def remap_label(label):
 	return "NONE"
 
 
-#class FlatCSVWriter:
-#	""" 
-#		Class to write flare time series data to CSV 
-#			- Writes header: t0,x1,…,xN,label.
-#			- Enforces fixed length N (derived from window_hours / resample).
-#			- Skips rows containing NaNs/Infs so the CSV stays clean for ML loaders
-#	"""
-#	def __init__(self, path: Path, N: int):
-#		self.path = path
-#		self.N = N
-#		self._f = open(self.path, "w", encoding="utf-8")
-#		self._f.write(",".join(["t0"]+[f"x{i}" for i in range(1,N+1)]+["label"])+"\n")
-#    
-#	def write_row(self, t0_iso, x_vals, label):
-#		if len(x_vals)!=self.N: 
-#			return
-#		if np.isnan(x_vals).any(): 
-#			return
-#		parts = [t0_iso]+[f"{v:.10g}" for v in x_vals]+[label]
-#		self._f.write(",".join(parts)+"\n")
-#
-#	def close(self): 
-#		self._f.close()
-	
-	
 class FlatCSVWriter:
 	"""
 		Class to write flare time series data to CSV 
@@ -359,50 +332,36 @@ def build_history_channel(index, args, events_df, encoding="binary"):
 	else:
 		class_map = {"A": 1, "B": 2, "C": 3, "M": 4, "X": 5}
 
-	# We only need events overlapping the current input window
-	# (this is the segment you already computed as `seg`).
-	# Use the same `start`/`end` that define the input window.
-	# Expect columns: timestamp_start, timestamp_end, flare_type
 	for _, row in events_df.iterrows():
 		s = row.get("timestamp_start")
 		e = row.get("timestamp_end")
 		if pd.isna(s) or pd.isna(e):
 			continue
 
-		# fast window overlap check
 		if e < index[0] or s > index[-1]:
 			continue
 
-		# skip low type flares?
 		ftype = str(row.get("flare_type", "")).strip()
-		key = ftype[:1].upper() # leading letter (A/B/C/M/X)
+		key = ftype[:1].upper()
 		low_flare_type= (key=="A" or key=="B")
 		if args.skip_ABflares_in_history and low_flare_type:
 			continue
 
 		val = 1.0
 		if encoding == "ordinal":
-			#ftype = str(row.get("flare_type", "")).strip()
-			# leading letter (A/B/C/M/X)
-			#key = ftype[:1].upper()
 			val = float(class_map.get(key, 1))
 
-		# mark overlap region on the same 1-min grid
 		mask = (index >= s) & (index <= e)
 		if mask.any():
-			# take max in case multiple flares overlap
 			H.loc[mask] = np.maximum(H.loc[mask].values, val)
 
 	return H
 
 
-
 def compute_series_for_sat(sat, args, events_df, flat_writer):
 	""" 
 		Create time series data
-			Now supports sub-daily cadence via --stride-hours:
-			for each background day, generate windows starting at day_start + k*stride
-			where day_start is either 00:00 (if --start-align=midnight) or the background timestamp.
+			(unchanged logic) but now supports sub-daily stride via --stride-hours and --start-align.
 	"""
     
 	# - Set dir names
@@ -410,15 +369,14 @@ def compute_series_for_sat(sat, args, events_df, flat_writer):
 	sci_dir = args.science_root / sat_name
 	bg_dir  = args.background_root / sat_name
 	if not sci_dir.exists() or not bg_dir.exists():
-		return pd.DataFrame(), []
-
+		return pd.DataFrame()
+		
 	# - Set skip date range
 	skip_ranges = []
 	for rng in args.skip_date_ranges:
 		try:
 			start_str, end_str = rng.split(":")
 			start_dt = pd.to_datetime(start_str + "-01", utc=True)
-			# Use month end for end_dt
 			year, month = map(int, end_str.split("-"))
 			end_dt = pd.Timestamp(year=year, month=month, day=1, tz="UTC") + pd.offsets.MonthEnd(1)
 			skip_ranges.append((start_dt, end_dt))
@@ -442,12 +400,13 @@ def compute_series_for_sat(sat, args, events_df, flat_writer):
 	window = pd.Timedelta(hours=args.window_hours)
 	one = pd.Timedelta(args.resample)
 	N_expected = int(window/one)
-	# Determine stride
+	print(f"Creating time series of length {N_expected} from science/bkg data ...")    
+
+	# NEW: stride handling
 	stride_hours = args.stride_hours if args.stride_hours is not None else float(args.window_hours)
 	if stride_hours <= 0:
 		raise ValueError("--stride-hours must be > 0")
 	stride = pd.Timedelta(hours=stride_hours)
-	print(f"Creating time series of length {N_expected} from science/bkg data with stride {stride} ...")    
 
 	N_skip_date= 0
 	N_skip_year= 0
@@ -461,19 +420,20 @@ def compute_series_for_sat(sat, args, events_df, flat_writer):
 	
 	for _, row in bg.iterrows():
 		bg_ts = pd.to_datetime(row["timestamp"], utc=True)
-		day_start = (bg_ts.floor("D") if args.start_align == "midnight" else bg_ts)
+		day_start = bg_ts.floor("D") if args.start_align == "midnight" else bg_ts
 
-		# Generate sub-daily windows within this background day
+		# iterate sub-daily windows within this background day
 		offset = pd.Timedelta(0)
 		while offset < pd.Timedelta(days=1):
 			start = day_start + offset
-			# prevent slipping into the next day if anchored on background ts
+			# stop if crossing into the next day
 			if start.floor("D") != day_start.floor("D"):
 				break
+
 			end = start + window
 			seg = sci.loc[start:end-one].copy()
-			print(f"--> day={day_start.date()} slot_start={start}, end={end}, len={len(seg)}")
-			N_tot += 1
+			print(f"--> day={day_start.date()} slot_start={start}, end={end}, seg_len={len(seg)}")
+			N_tot+= 1
 
 			# - Skip year?
 			if start.year in set(args.skip_years):
@@ -481,7 +441,7 @@ def compute_series_for_sat(sat, args, events_df, flat_writer):
 				N_skip_year+= 1
 				offset += stride
 				continue
-		
+			
 			# - Skip windows that start in any excluded date range
 			if skip_ranges and any(s_dt <= start <= e_dt for (s_dt, e_dt) in skip_ranges):
 				print(f"Skipping series: start {start} falls in a skip range ...")
@@ -489,24 +449,24 @@ def compute_series_for_sat(sat, args, events_df, flat_writer):
 				offset += stride
 				continue
 
-			# - Check if time series has too many NANs
-			frac_valid = seg["science"].notna().mean() if len(seg) > 0 else 0.0
+			# - Check if time series has too any NANs
+			frac_valid = seg["science"].notna().mean()    
 			if seg.empty or frac_valid < args.min_coverage:
 				print(f"WARN: Skipping time series as empty or with too many NANs (frac_valid={frac_valid}) ...")
 				N_skip_nan+= 1
 				offset += stride
 				continue
-			
+				
 			# - Fill any NaNs by interpolation
 			seg["science"] = seg["science"].interpolate(limit_direction="both")
-		
+			
 			# - Skip time series if background measurement is 0 or inf/NaN
 			if not np.isfinite(row["background"]) or row["background"]<=0: 
 				print("WARN: Skipping time series as bkg value is 0/inf/nan...")
 				N_skip_badbkg+= 1
 				offset += stride
 				continue
-			
+				
 			# - Skip time series that have flares occurring in the same time period?	
 			if args.skip_inwindow_atleast != "NONE":
 				thr = SEVERITY[args.skip_inwindow_atleast]
@@ -521,7 +481,7 @@ def compute_series_for_sat(sat, args, events_df, flat_writer):
 
 			# - Compute flux ratios
 			ratio = seg["science"]/row["background"]
-		
+			
 			# - Select flare events occurring in the range [end+gap, end+gap+window]
 			gap = pd.Timedelta(hours=args.forecast_gap_hours)
 			label_start = end + gap
@@ -531,29 +491,28 @@ def compute_series_for_sat(sat, args, events_df, flat_writer):
 			label = choose_label(occ["class"].tolist())
 			label_final= remap_label(label)
 			id_final= LABEL2ID[label_final]
-		
-			# - Compute flare binary/ordinal history time series if requested
+			
+			# - Compute flare history time series?
 			hist = None
 			if args.emit_history_channel:
 				print("Creating flare history time series channel ...")
 				hist = build_history_channel(seg.index, args, events_df, args.history_encoding)
-    
+		
 			# ---- Save NPZ (ratio [+ hist]) ----
 			if not args.dry_run:
 				out_path = args.outdir / f"series/{sat_name}/{start:%Y%m%d_%H%M%S}__W{args.window_hours}.npz"
 				Path(out_path).parent.mkdir(parents=True, exist_ok=True)
 				print(f"Saving npy data to file {out_path} ...")
-			
+				
 				npz_kwargs = {
-					"time": seg.index.astype("int64").to_numpy(),        # ns since epoch
+					"time": seg.index.astype("int64").to_numpy(),
 					"ratio": ratio.values.astype("float32"),
-					"label": np.array(label_final)                        # e.g. "NONE","C","M","X"
+					"label": np.array(label_final)
 				}
 				if args.emit_history_channel and (hist is not None):
 					npz_kwargs["hist"] = hist.values.astype("float32")
-
 				np.savez_compressed(out_path, **npz_kwargs)
-			
+				
 			# ---- Save flat CSV (r1..rN [, h1..hN], label) ----
 			if args.emit_flat_csv and flat_writer and len(ratio) == N_expected:
 				start_str = start.strftime("%Y-%m-%d %H:%M:%S")
@@ -563,7 +522,7 @@ def compute_series_for_sat(sat, args, events_df, flat_writer):
 					flat_vals = ratio.values.astype("float32")
 				print("Saving csv data ...")
 				flat_writer.write_row(start_str, flat_vals, label_final)
-			
+				
 			# ---- Append to json output ----
 			t_data_start= start.strftime("%Y-%m-%d %H:%M:%S")
 			t_data_end= end.strftime("%Y-%m-%d %H:%M:%S")
@@ -575,7 +534,7 @@ def compute_series_for_sat(sat, args, events_df, flat_writer):
 			t_forecast_start_posix= label_start.timestamp()
 			t_forecast_end_posix= label_end.timestamp()
 			xrf_flux_ratio_data= list(ratio.values.astype("float32"))
-		
+			
 			outdict= {
 				"satellite": sat_name,
 				"id": int(id_final),
@@ -594,14 +553,14 @@ def compute_series_for_sat(sat, args, events_df, flat_writer):
 				"t_forecast_end": float(t_forecast_end_posix),
 				"xrs_flux_ratio": [float(item) for item in xrf_flux_ratio_data] 	
 			}
-		
+			
 			if args.emit_history_channel and (hist is not None):
 				flare_hist_data= list(hist.values.astype("float32"))
 				outdict["flare_hist"]= [float(item) for item in flare_hist_data]
-		
+			
 			print("Saving json data ...")
 			outdict_list.append(outdict)
-		
+			
 			# ---- Index/metadata row ----     
 			rows.append(
 				{
@@ -616,7 +575,6 @@ def compute_series_for_sat(sat, args, events_df, flat_writer):
 
 			# advance to next sub-daily slot
 			offset += stride
-
 
 	print("== STATS ==")
 	print(f"Ntot= {N_tot}")
@@ -683,3 +641,4 @@ def main():
 
 if __name__=="__main__":
 	main()
+
