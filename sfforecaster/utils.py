@@ -355,6 +355,7 @@ def maybe_wrap_classifier_with_dropout(model, p: float, num_out: int | None = No
 	
 	clf = getattr(model, "classifier")
 	if isinstance(clf, torch.nn.Sequential):
+		logger.info("Model classifier already wrapped with dropout layer ...")
 		return  # already wrapped
 		
 	if isinstance(clf, torch.nn.Linear):

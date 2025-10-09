@@ -531,7 +531,10 @@ def load_videomae_model(
 			state = load_state_dict_any(args.model)  # works with checkpoint dir or .bin/.safetensors
 			needs_seq_head = any(k.startswith("classifier.1.") for k in state.keys())
 			has_plain_linear = hasattr(model, "classifier") and isinstance(model.classifier, torch.nn.Linear)
+			logger.info(f"needs_seq_head? {needs_seq_head}, has_plain_linear? {has_plain_linear}")
+			
 			if needs_seq_head and has_plain_linear:
+				logger.info("Check if wrapping classifier with dropout ...")
 				p = getattr(getattr(model, "config", object()), "head_dropout", args.head_dropout)
 				maybe_wrap_classifier_with_dropout(model, p)
 				# reload so classifier.* weights map correctly
