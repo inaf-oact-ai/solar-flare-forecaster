@@ -1,0 +1,106 @@
+from PIL import Image
+import matplotlib.pyplot as plt
+import os
+import sys
+
+def draw_hmi(filename, save=False, cmap="gray"):
+	""" Read & draw hmi """
+	
+	# - Read image
+	image= Image.open(filename)
+
+	# - Draw image
+	#fig, ax = plt.subplots(nrows=1, ncols=1, figsize=(12, 12))
+
+	plt.imshow(image, cmap="gray")
+	plt.axis('off')    
+
+	if save:
+		plt.savefig('image.png', bbox_inches='tight', pad_inches=0)
+	else:
+		plt.show()
+		
+
+def draw_hmi_video(filenames, save=False, cmap="gray"):
+	""" Read & draw hmi """
+	
+	# - Draw image
+	nframes= len(filenames)
+	fig, ax = plt.subplots(nrows=1, ncols=nframes, figsize=(8, 20))
+
+	# - Read images
+	images= []
+	for i in range(nframes):
+		image= Image.open(filenames[i])
+		images.append(image)
+		ax[0][i].imshow(image, cmap="gray")
+		ax[0][i].axis('off')    
+
+	# - Save/draw
+	if save:
+		plt.savefig('video.png', bbox_inches='tight', pad_inches=0)
+	else:
+		plt.show()
+
+
+# - Read args
+p = argparse.ArgumentParser(description="Parser for reading data")
+p.add_argument("--metadata", required=True, type=str)
+p.add_argument("--label_sel", required=False, type=str, default="")
+p.add_argument("--index_sel", required=False, type=int, default=-1)
+p.add_argument("--save", action="store_true")
+args= p.parse_args()	
+
+inputfile= args.metadata
+label_sel= args.label_sel
+index_sel= args.index_sel
+save= args.save
+
+# - Read metadata
+print(f"Reading metadata {inputfile} ...")
+f= open(inputfile, "r")
+d= json.load(f)["data"]
+
+if index_sel!=-1:
+	if index_sel>=len(d):
+		print(f"ERROR: Sel index exceeding data size ({index_sel})!")
+		sys.exit(1)
+
+# - Detect if image/video
+is_video= False
+if 'filepaths' in d[0]:
+	is_video= True 
+
+# - Extract selected data
+if label_sel=="":
+	#d_sel= d
+	indices= [idx for idx, item in enumerate(d) if item["label"]==label_sel]
+else:
+	print(f"Extracting data for label {label_sel} ...")
+	indices= [idx for idx, item in enumerate(d) if item["label"]==label_sel]
+	#d_sel= [d[index] for index in indices]
+
+# - Select index of data to be read
+if index_sel!=-1:
+	if is_video:
+		print(f"--> Drawing item no. {index_sel} ...")
+		filenames= d[index_sel]["filenames"]
+		draw_hmi_video(filenames, args.save, cmap="gray")
+	else:
+		filename= d[index_sel]["filename"]
+		print(f"--> Drawing item no. {index_sel}: {filename} ...")
+		draw_hmi(filename, args.save, cmap="gray")
+
+else:
+	# - Reading data in loop
+	if is_video:
+		for index in indices:
+			print(f"--> Drawing item no. {index} ...")
+			filanames= d[index]["filenames"]
+			draw_hmi_video(filenames, args.save, cmap="gray")
+	else:
+		for index in indices:
+			filename= d[index]["filename"]
+			print(f"--> Drawing item no. {index}: {filename} ...")
+			draw_hmi(filename, args.save, cmap="gray")
+	
