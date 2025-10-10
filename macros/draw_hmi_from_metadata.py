@@ -1,8 +1,9 @@
-from PIL import Image
-import matplotlib.pyplot as plt
 import os
 import sys
 import argparse
+import json
+from PIL import Image
+import matplotlib.pyplot as plt
 
 def draw_hmi(filename, save=False, cmap="gray"):
 	""" Read & draw hmi """
