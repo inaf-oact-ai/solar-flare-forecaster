@@ -81,6 +81,11 @@ else:
 	print(f"Extracting data for label {label_sel} ...")
 	indices= [idx for idx, item in enumerate(d) if item["label"]==label_sel]
 	#d_sel= [d[index] for index in indices]
+	
+# - Get list of ARs
+unique_ars= set([d[index]["AR"] for index in indices])
+print("unique_ars")
+print(unique_ars)	
 
 # - Select index of data to be read
 if index_sel!=-1:
