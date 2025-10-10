@@ -50,6 +50,7 @@ p = argparse.ArgumentParser(description="Parser for reading data")
 p.add_argument("--metadata", required=True, type=str)
 p.add_argument("--label_sel", required=False, type=str, default="")
 p.add_argument("--index_sel", required=False, type=int, default=-1)
+p.add_argument("--select_one_per_ar", action="store_true")
 p.add_argument("--save", action="store_true")
 args= p.parse_args()	
 
@@ -83,9 +84,16 @@ else:
 	#d_sel= [d[index] for index in indices]
 	
 # - Get list of ARs
-unique_ars= list(set([d[index]["AR"] for index in indices]))
+unique_ars= list(set([d[index]["ar"] for index in indices]))
 print("unique_ars")
-print(unique_ars)	
+print(unique_ars)
+index_ar_dict= {}
+for index in indices:
+	ar= d[index]["ar"]
+	index_ar_dict[ar]= index
+	
+if args.select_one_per_ar:
+	indices= list(index_ar_dict.values())
 
 # - Select index of data to be read
 if index_sel!=-1:
@@ -102,12 +110,16 @@ else:
 	# - Reading data in loop
 	if is_video:
 		for index in indices:
-			print(f"--> Drawing item no. {index} ...")
-			filanames= d[index]["filepaths"]
+			filenames= d[index]["filepaths"]
+			label= d[index]["label"]
+			ar= d[index]["ar"]
+			print(f"--> Drawing item no. {index} (AR={ar}, label={label}): {str(filenames)} ...")
 			draw_hmi_video(filenames, args.save, cmap="gray")
 	else:
 		for index in indices:
 			filename= d[index]["filepath"]
-			print(f"--> Drawing item no. {index}: {filename} ...")
+			label= d[index]["label"]
+			ar= d[index]["ar"]
+			print(f"--> Drawing item no. {index} (AR={ar}, label={label}): {filename} ...")
 			draw_hmi(filename, args.save, cmap="gray")
 	
