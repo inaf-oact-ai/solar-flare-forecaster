@@ -28,7 +28,7 @@ def draw_hmi_video(filenames, save=False, cmap="gray"):
 	
 	# - Draw image
 	nframes= len(filenames)
-	fig, ax = plt.subplots(nrows=1, ncols=nframes, figsize=(8, 20))
+	fig, ax = plt.subplots(nrows=1, ncols=nframes, figsize=(20, 8))
 
 	# - Read images
 	images= []
