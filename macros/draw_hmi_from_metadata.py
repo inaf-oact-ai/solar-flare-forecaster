@@ -35,8 +35,8 @@ def draw_hmi_video(filenames, save=False, cmap="gray"):
 	for i in range(nframes):
 		image= Image.open(filenames[i])
 		images.append(image)
-		ax[0][i].imshow(image, cmap="gray")
-		ax[0][i].axis('off')    
+		ax[i].imshow(image, cmap="gray")
+		ax[i].axis('off')    
 
 	# - Save/draw
 	if save:
