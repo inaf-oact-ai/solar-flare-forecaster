@@ -87,7 +87,7 @@ else:
 
 # - Extract selected data by AR
 if args.ar_sel!=-1:
-	print(f"Extracting data for AR {ar_sel} ...")
+	print(f"Extracting data for AR {args.ar_sel} ...")
 	indices= [idx for idx in indices if d[idx]["ar"]==args.ar_sel]
 	
 # - Get list of ARs
