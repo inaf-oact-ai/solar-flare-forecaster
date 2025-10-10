@@ -33,6 +33,7 @@ def draw_hmi_video(filenames, save=False, cmap="gray"):
 	# - Read images
 	images= []
 	for i in range(nframes):
+		print(f"--> Drawing frame {filenames[i]} ...")
 		image= Image.open(filenames[i])
 		images.append(image)
 		ax[i].imshow(image, cmap="gray")
