@@ -86,9 +86,9 @@ else:
 	#d_sel= [d[index] for index in indices]
 
 # - Extract selected data by AR
-if ar_sel!=-1:
+if args.ar_sel!=-1:
 	print(f"Extracting data for AR {ar_sel} ...")
-	indices= [idx for idx in indices if d[idx]["ar"]==ar_sel]
+	indices= [idx for idx in indices if d[idx]["ar"]==args.ar_sel]
 	
 # - Get list of ARs
 unique_ars= list(set([d[index]["ar"] for index in indices]))
