@@ -49,6 +49,7 @@ def draw_hmi_video(filenames, save=False, cmap="gray"):
 # - Read args
 p = argparse.ArgumentParser(description="Parser for reading data")
 p.add_argument("--metadata", required=True, type=str)
+p.add_argument("--ar_sel", required=False, type=int, default=-1)
 p.add_argument("--label_sel", required=False, type=str, default="")
 p.add_argument("--index_sel", required=False, type=int, default=-1)
 p.add_argument("--select_one_per_ar", action="store_true")
@@ -75,7 +76,7 @@ is_video= False
 if 'filepaths' in d[0]:
 	is_video= True 
 
-# - Extract selected data
+# - Extract selected data by label
 if label_sel=="":
 	#d_sel= d
 	indices= [idx for idx, item in enumerate(d) if item["label"]==label_sel]
@@ -83,6 +84,11 @@ else:
 	print(f"Extracting data for label {label_sel} ...")
 	indices= [idx for idx, item in enumerate(d) if item["label"]==label_sel]
 	#d_sel= [d[index] for index in indices]
+
+# - Extract selected data by AR
+if ar_sel!=-1:
+	print(f"Extracting data for AR {ar_sel} ...")
+	indices= [idx for idx in indices if d[idx]["ar"]==ar_sel]
 	
 # - Get list of ARs
 unique_ars= list(set([d[index]["ar"] for index in indices]))
