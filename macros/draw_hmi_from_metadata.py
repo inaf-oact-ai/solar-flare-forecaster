@@ -86,10 +86,10 @@ else:
 if index_sel!=-1:
 	if is_video:
 		print(f"--> Drawing item no. {index_sel} ...")
-		filenames= d[index_sel]["filenames"]
+		filenames= d[index_sel]["filepaths"]
 		draw_hmi_video(filenames, args.save, cmap="gray")
 	else:
-		filename= d[index_sel]["filename"]
+		filename= d[index_sel]["filepath"]
 		print(f"--> Drawing item no. {index_sel}: {filename} ...")
 		draw_hmi(filename, args.save, cmap="gray")
 
@@ -98,11 +98,11 @@ else:
 	if is_video:
 		for index in indices:
 			print(f"--> Drawing item no. {index} ...")
-			filanames= d[index]["filenames"]
+			filanames= d[index]["filepaths"]
 			draw_hmi_video(filenames, args.save, cmap="gray")
 	else:
 		for index in indices:
-			filename= d[index]["filename"]
+			filename= d[index]["filepath"]
 			print(f"--> Drawing item no. {index}: {filename} ...")
 			draw_hmi(filename, args.save, cmap="gray")
 	
