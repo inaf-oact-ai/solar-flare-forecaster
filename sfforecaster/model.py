@@ -22,7 +22,7 @@ from transformers import VideoMAEForVideoClassification
 from transformers import ViTForImageClassification
 from transformers.modeling_outputs import SequenceClassifierOutput
 from transformers.configuration_utils import PretrainedConfig
-from transformers import AutoImageProcessor, AutoModelForImageClassification
+from transformers import AutoImageProcessor, AutoModelForImageClassification, AutoConfig
 
 # - MODULE
 from sfforecaster.utils import *
@@ -527,7 +527,9 @@ class ImageEncoderWrapper(torch.nn.Module):
 		model_name: str, 
 		freeze_backbone: bool = False, 
 		max_freeze_layer_id: int = -1, 
-		trust_remote_code: bool = True
+		trust_remote_code: bool = True,
+		encoder_hidden_dropout: float | None = None,
+		encoder_attn_dropout: float | None = None,
 	):
 		super().__init__()
 		
@@ -535,19 +537,43 @@ class ImageEncoderWrapper(torch.nn.Module):
 		self.freeze_backbone= freeze_backbone
 		self.max_freeze_layer_id= max_freeze_layer_id
 		
+		# - Set config
+		cfg = AutoConfig.from_pretrained(model_name, trust_remote_code=trust_remote_code)
+
+		# --- attention dropout override ---
+		if encoder_attn_dropout is not None:
+			# SigLIP2: nested vision_config.attention_dropout
+			if getattr(cfg, "model_type", "") == "siglip" and hasattr(cfg, "vision_config"):
+				if hasattr(cfg.vision_config, "attention_dropout"):
+					cfg.vision_config.attention_dropout = float(encoder_attn_dropout)
+			# Generic ViT-style names (many backbones use these)
+			elif hasattr(cfg, "attention_probs_dropout_prob"):
+				cfg.attention_probs_dropout_prob = float(encoder_attn_dropout)
+			elif hasattr(cfg, "attention_dropout"):
+				cfg.attention_dropout = float(encoder_attn_dropout)
+			# else: silently unsupported (no crash)
+
+		# --- hidden/MLP dropout override (if the backbone exposes a field) ---
+		if encoder_hidden_dropout is not None:
+			if hasattr(cfg, "hidden_dropout_prob"):
+				cfg.hidden_dropout_prob = float(encoder_hidden_dropout)
+			elif getattr(cfg, "model_type", "") == "siglip":
+				# SigLIP vision_config has no explicit "hidden" dropout knob -> ignore
+				pass
+			elif hasattr(cfg, "dropout"):
+				cfg.dropout = float(encoder_hidden_dropout)
+			# else: ignore if unsupported
+
 		# - Load entire model
-		#self.full_model = AutoModelForImageClassification.from_pretrained(
-		#	model_name, trust_remote_code=trust_remote_code
-		#)
+		#   NB: Pass cfg so the instantiated modules pick up the overrides
 		_fm = AutoModelForImageClassification.from_pretrained(
-			model_name, trust_remote_code=trust_remote_code
+			model_name, config=cfg, trust_remote_code=trust_remote_code
 		)
 		
 		# - Load image processor
 		self.image_processor = AutoImageProcessor.from_pretrained(model_name)
 		
 		# - Retrieve encoder
-		#self.encoder = self._extract_encoder(self.full_model)
 		self.encoder = self._extract_encoder(_fm)
 
 		# - Create head
@@ -623,7 +649,10 @@ class ImageFeatTSClassifier(torch.nn.Module):
 		max_img_freeze_layer_id: int = -1,
 		trust_remote_code: bool = True,
 		layernorm_eps: float = 1e-6,
-		head_dropout: float = 0.0
+		head_dropout: float = 0.0,
+		proj_dropout: float = 0.0,
+    encoder_hidden_dropout: float | None = None,
+    encoder_attn_dropout: float | None = None,
 	):
 		super().__init__()
 		assert patching_mode in ("time_only", "time_variate")
@@ -639,13 +668,16 @@ class ImageFeatTSClassifier(torch.nn.Module):
 		self.freeze_backbone = freeze_backbone
 		self.max_freeze_layer_id= max_freeze_layer_id
 		self.dropout = torch.nn.Dropout(p=head_dropout)
+		self.proj_dropout = (torch.nn.Dropout(p=proj_dropout) if (proj_dropout and proj_dropout > 0.0) else torch.nn.Identity())
 		
 		# - Create image encoder
 		self.image_enc= ImageEncoderWrapper(
 			image_model_name,
 			freeze_backbone=freeze_img_backbone,
 			max_freeze_layer_id=max_img_freeze_layer_id,
-			trust_remote_code=trust_remote_code
+			trust_remote_code=trust_remote_code,
+			encoder_hidden_dropout=encoder_hidden_dropout,
+			encoder_attn_dropout=encoder_attn_dropout,
 		)
 		self.image_processor= self.image_enc.image_processor
 		
@@ -848,6 +880,7 @@ class ImageFeatTSClassifier(torch.nn.Module):
 		x = self._proj(x)                               # [B, T, K]
 		# (Optional) keep LN math in fp32 and cast back if you sometimes feed fp16/bf16
 		x = self.ln(x.float()).to(x.dtype)             # [B, T, K]
+		x = self.proj_dropout(x) # add dropout
 		x = x.clone()
 		x = x.contiguous()
 

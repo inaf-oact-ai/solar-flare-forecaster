@@ -36,7 +36,7 @@ from transformers import AutoProcessor, AutoModel
 from transformers import AutoImageProcessor, AutoModelForImageClassification
 from transformers import ViTImageProcessor, ViTForImageClassification, ViTConfig
 from transformers import VideoMAEImageProcessor, VideoMAEForPreTraining
-from transformers import VideoMAEForVideoClassification
+from transformers import VideoMAEForVideoClassification, VideoMAEConfig
 from transformers.configuration_utils import PretrainedConfig
 from transformers.modeling_utils import PreTrainedModel
 from transformers.data.data_collator import DataCollator
@@ -192,6 +192,9 @@ def get_args():
 	
 	parser.add_argument('-weight_decay','--weight_decay', dest='weight_decay', type=float, default=0.0, help='AdamW weight decay (default=0.0)')
 	parser.add_argument('--head_dropout', dest='head_dropout', type=float, default=0.0, help='Dropout prob before classifier heads (default=0.0)')
+	parser.add_argument('--proj_dropout', dest='proj_dropout', type=float, default=0.0, help='Dropout prob applied to per-timestep projected features before Moirai (imgfeatts).')
+	parser.add_argument('--enc_hidden_dropout', type=float, default=None, help='Override encoder hidden_dropout_prob (if supported by the backbone).')
+	parser.add_argument('--enc_attn_dropout', type=float, default=None, help='Override encoder attention_probs_dropout_prob (if supported by the backbone).')
                     
 	parser.add_argument('--ddp_find_unused_parameters', dest='ddp_find_unused_parameters', action='store_true', help='Flag passed to DistributedDataParallel when using distributed training (default=false)')	
 	parser.set_defaults(ddp_find_unused_parameters=False)
@@ -521,10 +524,21 @@ def load_videomae_model(
 ):
 	""" Load video model & processor """
 	
+	# - Override config
+	#cfg = VideoMAEConfig.from_pretrained(args.model)
+	#if args.enc_attn_dropout is not None:
+	#	if hasattr(cfg, "attention_probs_dropout_prob"):
+	#		cfg.attention_probs_dropout_prob = float(args.enc_attn_dropout)
+	#	elif hasattr(cfg, "attention_dropout"):
+	#		cfg.attention_dropout = float(args.enc_attn_dropout)
+
+	#if args.enc_hidden_dropout is not None and hasattr(cfg, "hidden_dropout_prob"):
+	#	cfg.hidden_dropout_prob = float(args.enc_hidden_dropout)
 	
 	if inference_mode:
 		# - Load model for inference
 		model = VideoMAEForVideoClassification.from_pretrained(args.model)
+		#model = VideoMAEForVideoClassification.from_pretrained(args.model, config=cfg)
 		
 		# - Ensure head matches the checkpoint if it was trained with Dropout+Linear
 		try:
@@ -549,6 +563,7 @@ def load_videomae_model(
 		try:
 			if args.binary:
 				model = VideoMAEForVideoClassification.from_pretrained(args.model, num_labels=1) # tmp
+				#model = VideoMAEForVideoClassification.from_pretrained(args.model, num_labels=1, config=cfg) # tmp
 				in_features = model.classifier.in_features
 				model.classifier = torch.nn.Linear(in_features, 1)
 				model.config.num_labels = 1
@@ -560,9 +575,10 @@ def load_videomae_model(
 					problem_type="single_label_classification", 
 					id2label=id2label, 
 					label2id=label2id,
-					num_labels=num_labels
-					#attn_implementation="sdpa", # "flash_attention_2" 
+					num_labels=num_labels,
+					#attn_implementation="sdpa", # "flash_attention_2"
 					#torch_dtype=torch.float16,  # "auto"
+					#config=cfg,
 				)
 		except Exception as e:
 			logger.warning(f"Failed to load VideoMAE (err={str(e)}), trying alternative method ...")
@@ -634,6 +650,9 @@ def load_imgfeatts_model(
 		freeze_img_backbone=args.freeze_backbone,
 		max_img_freeze_layer_id=args.max_freeze_layer_id,
 		head_dropout=args.head_dropout,
+		proj_dropout=args.proj_dropout,
+		encoder_hidden_dropout=args.enc_hidden_dropout,
+		encoder_attn_dropout=args.enc_attn_dropout,
 	)
 	
 	# - Add head_dropout option in config
