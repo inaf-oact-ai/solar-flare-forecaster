@@ -126,6 +126,12 @@ For time series inputs, the required json format is:
 ```
 In this case, you should specify the name of time series variables in the `--ts_vars` option, e.g. `--ts_vars="tsvar1,tsvar2,...,tsvarN"`.     
 
+**RUN MODE**     
+`--predict`: Run model prediction on input data `--datalist`. Default: disabled   
+`--test`: Run model testing on input data `--datalist`. Default: disabled.   
+
+With either one of these options enabled, the model is in eval mode. If none of the options is given, a model training run is performed.    
+
 **DATA PRE-PROCESSING (IMAGES/VIDEOS)**     
 `--zscale`: Apply zscale transform to input images. Default: not applied.   
 `--zscale_contrast=[VALUE]`: zscale contrast parameter. Default: 0.25   
@@ -184,7 +190,6 @@ In this case, you should specify the name of time series variables in the `--ts_
 `--sample_weight_compute_mode`: How to compute sample weights: {"balanced", "inverse", "inverse_v2"}. Default: "balanced"         
 
 **MODEL EVAL**    
-`--logging_steps=[VALUE]`: Number of logging steps. Default: 1    
 `--run_eval_on_start`: Run model evaluation on start for debug. Default: disabled    
 `--run_eval_on_start_manual`: Run model evaluation manually on start for debug. Default: disabled    
 `--run_eval_on_step=[VALUE]`: Run model evaluation after each step. Default: disabled    
@@ -204,6 +209,19 @@ In this case, you should specify the name of time series variables in the `--ts_
 `--sol_distribution=[VALUE]`: Score-oriented distribution used: {"uniform", "cosine"}. Default: "uniform"             
 `--sol_mode=[VALUE]`: Score-averaging used in score-oriented loss: {"weighted", "average"}. Default: "average"             
 `--sol_add_constant`: Add constant (+1) to score-oriented loss. Default: not added              
+
+**RUN/LOGGING**     
+`--device`: Device identifier. Default: "cuda:0"      
+`--logging_steps=[VALUE]`: Number of logging steps. Default: 1    
+`--runname=[VALUE]`: Run name for wandb/tensorboard. Default: "sfforecast"     
+`--verbose`: Enable verbose printout. Default: disabled       
+`--report_to=[VALUE]`: Report logs/metrics to {"none", "tensorboard", "wandb"}. Default: "wandb"      
+`--local_rank=[VALUE]`: Options for distributed run. Default: LOCAL_RANK        
+`--rank=[VALUE]`: Options for distributed run. Default: RANK                    
+`--world_size=[VALUE]`: Options for distributed run. Default: WORLD_SIZE               
+`--num_workers=[VALUE]`: Number of data processing workers. Default: 0                       
+`--pin_memory`: Enable pin memory option of Transformer lib: {"true","false"}. Default: "false"                   
+`--persistent_workers`: Enable persistent worker option of Transformer lib: {"true","false"}. Default: "false"                   
 
 
 
