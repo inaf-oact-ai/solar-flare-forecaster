@@ -11,3 +11,5 @@ accelerate
 evaluate
 matplotlib
 wandb
+tensorboard
+pynvml
