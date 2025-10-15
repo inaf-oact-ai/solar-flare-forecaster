@@ -166,8 +166,24 @@ In this case, you should specify the name of time series variables in the `--ts_
 `--ts_freeze_backbone`: Make Moirai backbone layers non-trainable. Default: all trainable               
 `--ts_max_freeze_layer_id`: ID of the last layer kept frozen. -1 means all are frozen if --ts_freeze_backbone option is enabled. Default: -1          	
 
+**MODEL TRAINING**  
+`--run_eval_on_start`: Run model evaluation on start for debug. Default: disabled    
+`--run_eval_on_start_manual`: Run model evaluation manually on start for debug. Default: disabled    
+`--run_eval_on_step=[VALUE]`: Run model evaluation after each step. Default: disabled    
+`--logging_steps=[VALUE]`: Number of logging steps. Default: 1    
+`--gradient_accumulation_steps=[VALUE]`: Number of updates steps to accumulate the gradients for, before performing a backward/update pass. Default: 1    
+`--nepochs=[VALUE]`: Number of epochs used in network training. Default: 1    
+`--lr_scheduler=[VALUE]`: Learning rate scheduler used: {"constant", "linear", "cosine", "cosine_with_min_lr"}. Default: "cosine"       
+`--lr=[VALUE]`: Learning rate used. Default: 5e-5        
+`--warmup_ratio=[VALUE]`: Warmup ratio parameter used. Default: 0.2                
+`--batch_size=[VALUE]`: Batch size used in training. Default: 8               
+`--batch_size_eval=[VALUE]`: Batch size used for evaluation. If None set equal to train batch size. Default: None                 
+`--drop_last`: Drop last incomplete batch. Default: disabled                  
+`--weight_decay=[VALUE]`: AdamW weight decay. Default: 0.0                
+`--head_dropout=[VALUE]`: Dropout prob before classifier heads. Default: 0.0                  
+`--proj_dropout=[VALUE]`: Dropout prob applied to per-timestep projected features before Moirai (imgfeatts model). Default: 0.0               
+`--ddp_find_unused_parameters`: Flag passed to DistributedDataParallel when using distributed training. Default: disabled               
 
-	
 	
 
 	
