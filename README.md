@@ -58,6 +58,8 @@ Supported options are:
 **INPUT DATA**  
 `--datalist=[VALUE]`: Path to input training/test data in json format   
 `--datalist_cv=[VALUE]`: Path to input validation data in json format   
+`--ts_vars=[VALUE]`: Name of time series variables in input json data, separated by commas. Default: 'xrs_flux_ratio,flare_hist'        
+`--ts_npoints=[VALUE]`: Number of points in time series variables. Default: 1440    
 
 For HMI image inputs, the required json format is:   
 
@@ -122,3 +124,23 @@ For time series inputs, the required json format is:
   ]
 }
 ```
+In this case, you should specify the name of time series variables in the `--ts_vars` option, e.g. `--ts_vars="tsvar1,tsvar2,...,tsvarN"`.     
+
+**DATA PRE-PROCESSING (IMAGES/VIDEOS)**     
+`--zscale`: Apply zscale transform to input images. Default: not applied.   
+`--zscale_contrast=[VALUE]`: zscale contrast parameter. Default: 0.25   
+`--grayscale`: Load input images in grayscale (1 chan tensor). Default: load as 3-chan RGB     
+`--use_model_processor`: Transform data using available model image processor in data collator. Default: not used         
+`--resize`: Resize input image before model processor (if enabled). Default: no resize      
+`--resize_size=[VALUE]`: Resize size in pixels used if --resize option is enabled. Default: 224        
+`--asinh_stretch`: Apply asinh stretch transform to input images. Default: not applied   
+`--pmin`: Min percentile parameter for asinh transform. Default: 0.5   
+`--pmax`: Max percentile parameter for asinh transform. Default: 99.5   
+`--asinh_scale`: asinh_scale parameter for asinh transform . Default: 0.5   
+
+**DATA PRE-PROCESSING (TIME-SERIES)**    
+	
+	
+	
+	
+  
