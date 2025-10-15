@@ -223,7 +223,11 @@ With either one of these options enabled, the model is in eval mode. If none of 
 `--pin_memory`: Enable pin memory option of Transformer lib: {"true","false"}. Default: "false"                   
 `--persistent_workers`: Enable persistent worker option of Transformer lib: {"true","false"}. Default: "false"                   
 
-
+**OUTPUTS**        
+`--outdir=[VALUE]`: Output data directory. Default: $PWD              
+`--max_checkpoints=[VALUE]`: Max number of saved checkpoints. Default: 2         
+`--outfile=[VALUE]`: Output file with saved inference results. Default: "classifier_results.json"          
+`--save_metric_curves`: If set, save precision/recall/F1/TSS/HSS/MCC/ApSS vs threshold to CSV for eval and test.. Default: disabled       
 
 
 	
