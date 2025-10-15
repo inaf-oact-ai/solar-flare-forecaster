@@ -2,7 +2,13 @@
 Solar flare forecaster application based on transformer models
 
 ## **About**
-Forecast solar flares with modern transformer backbones across three modalities — images, videos, and time series — using a single, consistent training/evaluation framework. The code accompanies the paper "Solar flare forecasting with foundational transformer models across image, video, and time-series modalities” (Riggi et al., 2025) and provides ready-to-use recipes plus trained checkpoints.
+This repository implements a solar flare forecasting application with modern transformer backbones across three modalities — images, videos, and time series — using a single, consistent training/evaluation framework:   
+
+* **Image forecaster (SigLIP2)** — processes single SDO/HMI magnetogram crops via a ViT encoder; head is a lightweight classifier. Trained with class-rebalancing strategies and weighted losses.
+* **Video forecaster (VideoMAE)** — processes short sequences (e.g., 16 frames) of magnetograms with a spatio-temporal ViT backbone; head is a classifier on the pooled representation.
+* **Time-series forecaster (Moirai2)** — processes GOES XRS flux-ratio sequences (and an optional flare-history channel) with a transformer encoder; head is a classifier over the forecasting target.
+
+This documentation provides ready-to-use recipes plus links to trained checkpoints.  
 
 ## **Credit**
 This software is distributed with GPLv3 license. If you use it for your research, please add a reference to this github repository and acknowledge these works in your paper:   
