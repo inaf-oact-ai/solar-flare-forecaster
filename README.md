@@ -134,13 +134,16 @@ In this case, you should specify the name of time series variables in the `--ts_
 `--resize`: Resize input image before model processor (if enabled). Default: no resize      
 `--resize_size=[VALUE]`: Resize size in pixels used if --resize option is enabled. Default: 224        
 `--asinh_stretch`: Apply asinh stretch transform to input images. Default: not applied   
-`--pmin`: Min percentile parameter for asinh transform. Default: 0.5   
-`--pmax`: Max percentile parameter for asinh transform. Default: 99.5   
-`--asinh_scale`: asinh_scale parameter for asinh transform . Default: 0.5   
+`--pmin=[VALUE]`: Min percentile parameter for asinh transform. Default: 0.5   
+`--pmax=[VALUE]`: Max percentile parameter for asinh transform. Default: 99.5   
+`--asinh_scale=[VALUE]`: asinh_scale parameter for asinh transform . Default: 0.5   
 
 **DATA PRE-PROCESSING (TIME-SERIES)**    
+`--ts_logstretchs=[VALUE]`: Log stretch TS vars separated by commas (1=enable, 0=disable). Must have same dimension of ts_vars. Default: "0,0"       	
+ 
+**DATA AUGMENTATION (IMAGES/VIDEOS)**      
+`--add_crop_augm`: If enabled, add random center crop and resize (--resize_size) augmentation in training. Default: not applied.      
+`--min_crop_fract=[VALUE]`: Mininum crop fraction. Default: 0.65             	 
+
+
 	
-	
-	
-	
-  
