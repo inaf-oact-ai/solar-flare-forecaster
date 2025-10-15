@@ -145,5 +145,31 @@ In this case, you should specify the name of time series variables in the `--ts_
 `--add_crop_augm`: If enabled, add random center crop and resize (--resize_size) augmentation in training. Default: not applied.      
 `--min_crop_fract=[VALUE]`: Mininum crop fraction. Default: 0.65             	 
 
+**MODEL (COMMON)**      
+`--data_modality=[VALUE]`: Data modality model used: {"image","video","ts"}. Default: "image"      
+`--model=[VALUE]`: Model pretrained file name or weight path to be loaded {"google/siglip-so400m-patch14-384","MCG-NJU/videomae-base"}. Default: "google/siglip-so400m-patch14-384"     
+`--binary`: Set binary classification label scheme. Default: multiclass   
+`--flare_thr=[VALUE]`: Choose flare class label name: {C-->label=C+,M-->label=M+}. Default: M      
+`--binary_thr=[VALUE]`: Binary decision threshold (used in eval/test). Default: 0.5   
 
+**MODEL (IMAGES/VIDEOS)**  
+`--vitloader`: If enabled use ViTForImageClassification to load image model otherwise AutoModelForImageClassification. Default: disabled        
+`--video_model`: Video model used: {"videomae","imgfeatts"}. Default: "videomae"           
+`--freeze_backbone`: Make image/video encoder backbone layers non-trainable. Default: all trainable        
+`--max_freeze_layer_id`: ID of the last layer kept frozen. -1 means all are frozen if --freeze_backbone option is enabled. Default: -1          	
+
+**MODEL (TIME SERIES)**  
+`--model_ts_backbone=[VALUE]`: Time series model backbone name. Default: "Salesforce/moirai-2.0-R-small"         
+`--model_ts_img_backbone=[VALUE]`: Image backbone model used in "imgfeatts" model type. Default: "google/siglip2-base-patch16-224"             
+`--ts_patching_mode=[VALUE]`: Patching mode used in time series model with input ts variates: {"time_only","time_variate"}. Default: "time_variate"              
+`--proj_dim=[VALUE]`: Size of linear projection layer in ImageFeatTSClassifier model. Default: 128               
+`--ts_freeze_backbone`: Make Moirai backbone layers non-trainable. Default: all trainable               
+`--ts_max_freeze_layer_id`: ID of the last layer kept frozen. -1 means all are frozen if --ts_freeze_backbone option is enabled. Default: -1          	
+
+
+	
+	
+
+	
+	
 	
