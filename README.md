@@ -229,6 +229,18 @@ With either one of these options enabled, the model is in eval mode. If none of 
 `--outfile=[VALUE]`: Output file with saved inference results. Default: "classifier_results.json"          
 `--save_metric_curves`: If set, save precision/recall/F1/TSS/HSS/MCC/ApSS vs threshold to CSV for eval and test.. Default: disabled       
 
+## **Model checkpoints**  
+We have trained models on the following datasets:    
 
-	
-	
+* *Images*: SDO/HMI AR magnetograms (cropped) with 24h-ahead labels (NONE/C/M/X). We use downsampled/ balanced splits for training to mitigate class imbalance.
+* *Videos*: built from the image dataset as sequences of N=16 frames with cadence Δt (e.g., 36 or 72 minutes); label equals the last frame’s label.
+* *Time series*: GOES XRS L2 1-min soft X-ray fluxes (0.1–0.8 nm) normalized by daily background, segmented into 12h/24h windows, plus one binary flare-history channel aligned at 1-min cadence.
+     
+Details are reported in the reference paper. All datasets are available in Zenodo at: INSERT URL.       
+Below, we report the url of model checkpoints.    
+
+| Model | Forecast Horizon (h) | Flare Threshold | Model Info | Checkpoint |
+| ------------- | ------------- | ------------- | ------------- | ------------- |
+| SigLIP2  | 24 | M+ |  | [url](https://huggingface.co/inaf-oact-ai/sfforecaster-M24h-hmi-siglip2-base) | 
+| VideoMAE  | 24 | M+ | 16 frames, 72 min cadence | [url](https://huggingface.co/inaf-oact-ai/sfforecaster-M24h-hmivideo-n16-fstep72min-videomae-base) | 
+| Moirai2  | 24 | M+ | 1440 points (T=24 h) | [url](https://huggingface.co/inaf-oact-ai/sfforecaster-M24h-goes-n1440-moirai2-small) | 
