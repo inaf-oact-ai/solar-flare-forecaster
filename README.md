@@ -32,7 +32,7 @@ To build and install the package, we recommend Python ≥ 3.10 and a recent CUDA
 
   **NB: uni2ts install can override your previously installed torch and torchvision version. In case of conflicts, manually adjust and align versions.**
   
-* Build and install package in virtual env:
+* Build and install package in virtual env:    
   ```(sfforecaster)$ cd $SRC_DIR```    
   ```(sfforecaster)$ python setup.py install```    
        
