@@ -46,3 +46,79 @@ To use package scripts:
 
 * Add binary directory to your ```PATH``` environment variable:   
   ``` export PATH=$PATH:$VENV_DIR/sfforecaster/bin ```    
+
+## **Usage**  
+
+To run the forecaster application on input data use the the provided script ```run.py```:   
+
+```(sfforecaster)$ python $VENV_DIR/sfforecaster/bin/run.py [OPTIONS]```    
+
+Supported options are: 
+
+**INPUT DATA**  
+`--datalist=[VALUE]`: Path to input training/test data in json format   
+`--datalist_cv=[VALUE]`: Path to input validation data in json format   
+
+For HMI image inputs, the required json format is:   
+
+```json
+{
+  "data": [
+    {
+      "filepath": "PATH-TO-HMI-IMAGE",
+      "label": "M+",
+      "id": 1,
+      "flare_type": "X",
+      "flare_id": 3
+    },
+    {
+      ...
+      ...
+    }
+  ]
+}
+```
+
+For HMI video inputs, the required json format is:   
+
+```json
+{
+  "data": [
+    {
+      "filepaths": ["PATH-TO-FIRST-HMI-FRAME", ..., "PATH-TO-LAST-HMI-FRAME"],
+      "label": "M+",
+      "id": 1,
+      "flare_type": "X",
+      "flare_id": 3
+    },
+    {
+      ...
+      ...
+    }
+  ]
+}
+```
+
+For time series inputs, the required json format is:   
+
+```json
+{
+  "data": [
+    {
+      "tsvar1": ["PATH-TO-FIRST-TS-ENTRY", ..., "PATH-TO-LAST-TS-ENTRY"],
+      "tsvar2": ["PATH-TO-FIRST-TS-ENTRY", ..., "PATH-TO-LAST-TS-ENTRY"],
+      ...
+      ...
+      "tsvarN": ["PATH-TO-FIRST-TS-ENTRY", ..., "PATH-TO-LAST-TS-ENTRY"],
+      "label": "M+",
+      "id": 1,
+      "flare_type": "X",
+      "flare_id": 3
+    },
+    {
+      ...
+      ...
+    }
+  ]
+}
+```
