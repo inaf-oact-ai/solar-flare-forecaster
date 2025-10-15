@@ -14,13 +14,26 @@ This software is distributed with GPLv3 license. If you use it for your research
 To build and install the package, we recommend Python ≥ 3.10 and a recent CUDA-enabled PyTorch:    
 
 * Download the software in a local directory, e.g. ```SRC_DIR```:   
-  ```$ git clone https://github.com/inaf-oact-ai/solar-flare-forecaster.git```   
+  ```$ git clone https://github.com/inaf-oact-ai/solar-flare-forecaster.git```
+  
 * Create and activate a virtual environment, e.g. ```sfforecaster```, under a desired path ```VENV_DIR```     
   ```$ python3 -m venv $VENV_DIR/sfforecaster```    
-  ```$ source $VENV_DIR/sfforecaster/bin/activate```   
+  ```$ source $VENV_DIR/sfforecaster/bin/activate```
+  
 * Install dependencies inside venv:   
-  ```(sfforecaster)$ pip install -r $SRC_DIR/requirements.txt```   
-* Build and install package in virtual env:   
+  ```(sfforecaster)$ pip install -r $SRC_DIR/requirements.txt```
+  
+* If you intend to use Moirai2 time series model, you need to download the latest `uni2ts` module (not tagged moirai v1 versions) in a desidered path (e.g. ```$MOIRAI_SRC_DIR```) and install it:      
+  ```(sfforecaster)$ mkdir $MOIRAI_SRC_DIR```
+  ```(sfforecaster)$ cd $MOIRAI_SRC_DIR```    
+  ```(sfforecaster)$ git clone https://github.com/SalesforceAIResearch/uni2ts.git```    
+  ```(sfforecaster)$ cd uni2ts```     
+  ```(sfforecaster)$ pip install -e '.[notebook]'```
+
+  **NB: uni2ts install can override your previously installed torch and torchvision version. In case of conflicts, manually adjust and align versions.**
+  
+* Build and install package in virtual env:
+  ```(sfforecaster)$ cd $SRC_DIR```    
   ```(sfforecaster)$ python setup.py install```    
        
 To use package scripts:
