@@ -96,8 +96,14 @@ def get_args():
 	# - Input options
 	parser.add_argument('-datalist','--datalist', dest='datalist', required=True, type=str, help='Input data json filelist') 
 	parser.add_argument('-datalist_cv','--datalist_cv', dest='datalist_cv', required=False, default="", type=str, help='Input data json filelist for validation') 
-
-	# - Image pre-processing options
+	
+	# - Data loading options
+	parser.add_argument('-ts_vars', '--ts_vars', dest='ts_vars', required=False, type=str, default='xrs_flux_ratio,flare_hist', action='store', help='Name of time series variables in input json data, separated by commas')
+	parser.add_argument('-ts_npoints', '--ts_npoints', dest='ts_npoints', required=False, type=int, default=1440, action='store',help='Number of points in ts features (default=1440)')
+	
+	# - Image pre-processing options (IMAGES/VIDEOS)
+	parser.add_argument('--use_model_processor', dest='use_model_processor', action='store_true', help='Use model image processor in data collator (default=false)')	
+	parser.set_defaults(use_model_processor=False)
 	parser.add_argument('--zscale', dest='zscale', action='store_true',help='Apply zscale transform to input images (default=false)')	
 	parser.set_defaults(zscale=False)
 	parser.add_argument('-zscale_contrast', '--zscale_contrast', dest='zscale_contrast', required=False, type=float, default=0.25, action='store', help='zscale contrast parameter (default=0.25)')
@@ -112,35 +118,21 @@ def get_args():
 	parser.add_argument('-pmax', '--pmax', dest='pmax', required=False, type=float, default=99.5, action='store', help='Max percentile for asinh transform (default=99.5)')
 	parser.add_argument('-asinh_scale', '--asinh_scale', dest='asinh_scale', required=False, type=float, default=0.5, action='store', help='asinh_scale for asinh transform (default=0.5)')
 	
-	parser.add_argument('--add_crop_augm', dest='add_crop_augm', action='store_true', help='If enabled, add crop and resize augmentation in training (default=false)')	
+	# - Image pre-processing options (TS)
+	parser.add_argument('-ts_logstretchs', '--ts_logstretchs', dest='ts_logstretchs', required=False, type=str, default='0,0', action='store', help='Log stretch TS vars separated by commas (1=enable, 0=disable). Must have same dimension of ts_vars.')	
+	
+	# - Image augmentations options
+	parser.add_argument('--add_crop_augm', dest='add_crop_augm', action='store_true', help='If enabled, add random center crop and resize (--resize_size) augmentation in training (default=false)')	
 	parser.set_defaults(add_crop_augm=False)
 	parser.add_argument('-min_crop_fract', '--min_crop_fract', dest='min_crop_fract', required=False, type=float, default=0.65, action='store', help='Mininum crop fraction (default=0.65).')
 	
-	
-	parser.add_argument('-ts_logstretchs', '--ts_logstretchs', dest='ts_logstretchs', required=False, type=str, default='0,0', action='store', help='Log stretch TS vars separated by commas (1=enable, 0=disable). Must have same dimension of ts_vars.')	
-	parser.add_argument('-ts_vars', '--ts_vars', dest='ts_vars', required=False, type=str, default='xrs_flux_ratio,flare_hist', action='store', help='Resize size in pixels used if --resize option is enabled (default=224)')
-	parser.add_argument('-ts_npoints', '--ts_npoints', dest='ts_npoints', required=False, type=int, default=1440, action='store',help='Number of points in ts features (default=1440)')
-	parser.add_argument("--ts_patching_mode", dest='ts_patching_mode', type=str, choices=["time_only", "time_variate"], default="time_variate", help="Patching mode to be used with input ts variates")
-	
-	# - Model options
-	parser.add_argument('-model', '--model', dest='model', required=False, type=str, default="google/siglip-so400m-patch14-384", action='store', help='Model pretrained file name or weight path to be loaded {google/siglip-large-patch16-256, google/siglip-base-patch16-256, google/siglip-base-patch16-256-i18n, google/siglip-so400m-patch14-384, google/siglip-base-patch16-224, MCG-NJU/videomae-base, MCG-NJU/videomae-large, OpenGVLab/VideoMAEv2-Large}')
-	parser.add_argument('-model_ts_backbone', '--model_ts_backbone', dest='model_ts_backbone', required=False, type=str, default="Salesforce/moirai-2.0-R-small", action='store', help='Model TS backbone name')
-	parser.add_argument('-model_ts_img_backbone', '--model_ts_img_backbone', dest='model_ts_img_backbone', required=False, type=str, default="google/siglip2-base-patch16-224", action='store', help='Model imgfeatts image backbone name')
-	
-	parser.add_argument('--vitloader', dest='vitloader', action='store_true', help='If enabled use ViTForImageClassification to load model otherwise AutoModelForImageClassification (default=false)')	
-	parser.set_defaults(vitloader=False)
-	
+	# - Model options (GENERAL)
 	parser.add_argument("--data_modality", dest='data_modality', type=str, choices=["image", "video", "ts"], default="image", help="Data modality model used")
-	
-	parser.add_argument("--video_model", dest='video_model', type=str, choices=["videomae", "imgfeatts"], default="videomae", help="Video model used")
-	parser.add_argument('-proj_dim', '--proj_dim', dest='proj_dim', required=False, type=int, default=128, action='store',help='Size of linear projection layer in ImageFeatTSClassifier model (default=128)')
-	
-	parser.add_argument('--use_model_processor', dest='use_model_processor', action='store_true', help='Use model image processor in data collator (default=false)')	
-	parser.set_defaults(use_model_processor=False)
+	parser.add_argument('-model', '--model', dest='model', required=False, type=str, default="google/siglip-so400m-patch14-384", action='store', help='Model pretrained file name or weight path to be loaded {google/siglip-large-patch16-256, google/siglip-base-patch16-256, google/siglip-base-patch16-256-i18n, google/siglip-so400m-patch14-384, google/siglip-base-patch16-224, MCG-NJU/videomae-base, MCG-NJU/videomae-large, OpenGVLab/VideoMAEv2-Large}')
 	
 	parser.add_argument('--binary', dest='binary', action='store_true',help='Choose binary classification label scheme (default=false)')	
 	parser.set_defaults(binary=False)
-	parser.add_argument('-flare_thr', '--flare_thr', dest='flare_thr', required=False, type=str, default='C', action='store',help='Choose flare class label name: {C-->label=C+,M-->label=M+}.')
+	parser.add_argument('-flare_thr', '--flare_thr', dest='flare_thr', required=False, type=str, default='M', action='store',help='Choose flare class label name: {C-->label=C+,M-->label=M+}.')
 	parser.add_argument('-binary_thr', '--binary_thr', dest='binary_thr', required=False, type=float, default=0.5, action='store',help='Binary selection threshold (default=0.5).')
 	
 	parser.add_argument('--multilabel', dest='multilabel', action='store_true',help='Do multilabel classification (default=false)')	
@@ -152,19 +144,25 @@ def get_args():
 	parser.add_argument('--ordinal', dest='ordinal', action='store_true',help='Load ordinal head model for classification (default=false)')	
 	parser.set_defaults(ordinal=False)
 	
-	#parser.add_argument('--skip_first_class', dest='skip_first_class', action='store_true',help='Skip first class (e.g. NONE/BACKGROUND) in multilabel classifier (default=false)')	
-	#parser.set_defaults(skip_first_class=False)
-	
+	# - Model options (IMAGE/VIDEO)
+	parser.add_argument('--vitloader', dest='vitloader', action='store_true', help='If enabled use ViTForImageClassification to load model otherwise AutoModelForImageClassification (default=false)')	
+	parser.set_defaults(vitloader=False)
+	parser.add_argument("--video_model", dest='video_model', type=str, choices=["videomae", "imgfeatts"], default="videomae", help="Video model used")
 	parser.add_argument('--freeze_backbone', dest='freeze_backbone', action='store_true',help='Make backbone layers are non-tranable (default=false)')	
 	parser.set_defaults(freeze_backbone=False)
 	parser.add_argument('-max_freeze_layer_id', '--max_freeze_layer_id', dest='max_freeze_layer_id', required=False, type=int, default=-1, action='store',help='ID of the last layer kept frozen. -1 means all are frozen if --freeze_backbone option is enabled (default=-1)')
+	parser.add_argument('--check_videomae_head', dest='check_videomae_head', action='store_true', help='Reinitialize videoMAE head if detected with suspicious numerica weights (default=false)')	
+	parser.set_defaults(check_videomae_head=False)
+	
+	# - Model options (TIME SERIES)	
+	parser.add_argument('-model_ts_backbone', '--model_ts_backbone', dest='model_ts_backbone', required=False, type=str, default="Salesforce/moirai-2.0-R-small", action='store', help='Model TS backbone name')
+	parser.add_argument("--ts_patching_mode", dest='ts_patching_mode', type=str, choices=["time_only", "time_variate"], default="time_variate", help="Patching mode to be used with input ts variates")
+	parser.add_argument('-model_ts_img_backbone', '--model_ts_img_backbone', dest='model_ts_img_backbone', required=False, type=str, default="google/siglip2-base-patch16-224", action='store', help='Model imgfeatts image backbone name')
+	parser.add_argument('-proj_dim', '--proj_dim', dest='proj_dim', required=False, type=int, default=128, action='store',help='Size of linear projection layer in ImageFeatTSClassifier model (default=128)')
 	
 	parser.add_argument('--ts_freeze_backbone', dest='ts_freeze_backbone', action='store_true',help='Make Moirai backbone layers are non-tranable (default=false)')	
 	parser.set_defaults(ts_freeze_backbone=False)
 	parser.add_argument('-ts_max_freeze_layer_id', '--ts_max_freeze_layer_id', dest='ts_max_freeze_layer_id', required=False, type=int, default=-1, action='store',help='ID of the last layer kept frozen. -1 means all are frozen if --ts_freeze_backbone option is enabled (default=-1)')
-	
-	parser.add_argument('--check_videomae_head', dest='check_videomae_head', action='store_true', help='Reinitialize videoMAE head if detected with suspicious numerica weights (default=false)')	
-	parser.set_defaults(check_videomae_head=False)
 	
 	
 	# - Model training options
@@ -177,10 +175,10 @@ def get_args():
 	parser.set_defaults(run_eval_on_step=False)
 	parser.add_argument('-gradient_accumulation_steps', '--gradient_accumulation_steps', dest='gradient_accumulation_steps', required=False, type=int, default=1, action='store',help='Number of updates steps to accumulate the gradients for, before performing a backward/update pass (default=1)')
 
-	parser.add_argument('-ngpu', '--ngpu', dest='ngpu', required=False, type=int, default=1, action='store',help='Number of gpus used for the run. Needed to compute the global number of training steps (default=1)')	
-	parser.add_argument('-nepochs', '--nepochs', dest='nepochs', required=False, type=int, default=1, action='store',help='Number of epochs used in network training (default=100)')	
+	#parser.add_argument('-ngpu', '--ngpu', dest='ngpu', required=False, type=int, default=1, action='store', help='Number of gpus used for the run. Needed to compute the global number of training steps (default=1)')	
+	parser.add_argument('-nepochs', '--nepochs', dest='nepochs', required=False, type=int, default=1, action='store', help='Number of epochs used in network training (default=100)')	
 	#parser.add_argument('-optimizer', '--optimizer', dest='optimizer', required=False, type=str, default='adamw', action='store',help='Optimizer used (default=rmsprop)')
-	parser.add_argument('-lr_scheduler', '--lr_scheduler', dest='lr_scheduler', required=False, type=str, default='constant', action='store',help='Learning rate scheduler used {constant, linear, cosine, cosine_with_min_lr} (default=cosine)')
+	parser.add_argument('-lr_scheduler', '--lr_scheduler', dest='lr_scheduler', required=False, type=str, default='cosine', action='store',help='Learning rate scheduler used {constant, linear, cosine, cosine_with_min_lr} (default=cosine)')
 	parser.add_argument('-lr', '--lr', dest='lr', required=False, type=float, default=5e-5, action='store',help='Learning rate (default=5e-5)')
 	#parser.add_argument('-min_lr', '--min_lr', dest='min_lr', required=False, type=float, default=1e-6, action='store',help='Learning rate min used in cosine_with_min_lr (default=1.e-6)')
 	parser.add_argument('-warmup_ratio', '--warmup_ratio', dest='warmup_ratio', required=False, type=float, default=0.2, action='store',help='Warmup ratio par (default=0.2)')
