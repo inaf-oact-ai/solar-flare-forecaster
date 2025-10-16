@@ -45,21 +45,22 @@ def extract_ar_and_dt(fname: str) -> Tuple[int, datetime]:
     dt = datetime.strptime(ts_str, "%Y%m%d_%H%M%S")
     return ar, dt
 
-def parse_row(row: List[str]) -> Dict[str, Any]:
-    if len(row) != 32:
-        raise ValueError(f"Expected 32 fields per row, got {len(row)}: {row}")
+def parse_row(row):
+    if len(row) < 32:
+        raise ValueError(f"Row has <32 fields: {row}")
 
-    feats = []
-    for i in range(29):
-        feats.append(float(row[i].strip()))
+    # take the LAST 32 fields to avoid off-by-one when extra cols exist
+    row = [c.strip() for c in row[-32:]]
+
+    feats = [float(row[i]) for i in range(29)]
 
     try:
-        class_label = int(str(row[29]).strip())
+        class_label = int(row[29])
     except Exception:
         class_label = None
 
-    reg_label = str(row[30]).strip()
-    fname = str(row[31]).strip()
+    reg_label = normalize_reg_label(row[30])
+    fname = row[31].strip()
 
     ar, dt = extract_ar_and_dt(fname)
     return {
@@ -67,14 +68,23 @@ def parse_row(row: List[str]) -> Dict[str, Any]:
         "dt": dt,
         "features": feats,
         "class_label": class_label,
-        "reg_label": reg_label,
+        "reg_label": reg_label,  # normalized
         "fname": fname,
     }
 
-def label_from_regression(reg_label: str) -> Dict[str, Any]:
-    if reg_label is None:
-        reg_label = "0"
-    r = reg_label.strip().upper()
+def normalize_reg_label(s: str) -> str:
+    if s is None:
+        return "0"
+    s = str(s).strip().strip('"').strip("'").upper()
+    if re.fullmatch(r'0+(\.0+)?', s):
+        return "0"
+    m = re.match(r'\s*([CMX])\s*([0-9]+(?:\.[0-9]+)?)', s)
+    if m:
+        return f"{m.group(1)}{m.group(2)}"
+    return s
+    
+def label_from_regression(reg_label: str):
+    r = normalize_reg_label(reg_label)
     if r == "0" or r == "":
         return dict(flare_type="NONE", flare_id=0, label="NONE", id=0)
     t = r[0]
