@@ -193,7 +193,7 @@ def main():
                 moving_window_size=args.moving_window_size
             )
             
-            print(f"Created #{len(series_windows)} for chunk no. {chunk_counter}/{len(chunks)} for ar {ar} ...")
+            print(f"Created #{len(series_windows)} series for chunk no. {chunk_counter}/{len(chunks)} for ar {ar} ...")
 
             for seq in series_windows:
                 feat_series = {f"feat{i+1}": [] for i in range(29)}
