@@ -181,7 +181,7 @@ def main():
 
     
     for ar, rows in rows_by_ar.items():
-        print(f"--> Creating chunks from ar {ar} ...")
+        print(f"--> Creating chunks from AR {ar} ...")
         print(rows)
         
         if args.expect_contiguous:
@@ -189,11 +189,13 @@ def main():
         else:
             chunks = [sorted(rows, key=lambda r: r["dt"])]
 
-        print(f"#{len(chunks)} chunks created for ar {ar} ...")
+        print(f"#{len(chunks)} chunks created for AR {ar} ...")
 
         chunk_counter= 0 
         for chunk in chunks:
             chunk_counter+= 1
+            
+            print(f"Creating series from chunk no. {chunk_counter}/{len(chunks)} (n={len(chunk)}) ...")
             
             # Build cadence-validated series windows
             series_windows = build_series_from_chunk(
@@ -205,7 +207,7 @@ def main():
                 moving_window_size=args.moving_window_size
             )
             
-            print(f"Created #{len(series_windows)} series for chunk no. {chunk_counter}/{len(chunks)} for ar {ar} ...")
+            print(f"Created #{len(series_windows)} series for chunk no. {chunk_counter}/{len(chunks)} for AR {ar} ...")
 
             for seq in series_windows:
                 feat_series = {f"feat{i+1}": [] for i in range(29)}
