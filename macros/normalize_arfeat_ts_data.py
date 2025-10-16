@@ -124,9 +124,9 @@ def main():
             if k in rec:
                 ax.plot(ts, rec[k], label=k)
 
-        ax.set_title(f"Normalized features for series #{idx} (AR {rec.get('ar', '?')})")
+        ax.set_title(f"AR {rec.get('ar', '?')}, label={rec.get('flare_type', '?')}")
         ax.set_xlabel("Time")
-        ax.set_ylabel(f"Normalized value [{args.norm_min}, {args.norm_max}]")
+        ax.set_ylabel(f"Normalized feature value")
         ax.xaxis.set_major_formatter(DateFormatter("%Y-%m-%d\n%H:%M"))
         ax.grid(True, alpha=0.3)
         if vars_to_plot:
