@@ -181,7 +181,9 @@ def main():
 
     
     for ar, rows in rows_by_ar.items():
-        print(f"--> Creating chunks from ar {ar} ...") 
+        print(f"--> Creating chunks from ar {ar} ...")
+        print(rows)
+        
         if args.expect_contiguous:
             chunks = contiguous_chunks(rows, args.base_cadence_min)
         else:
