@@ -140,12 +140,17 @@ def main():
         raise ValueError("--point-cadence-min must be a multiple of --base-cadence-min")
 
     step_entries = args.point_cadence_min // args.base_cadence_min
+    print(f"step_entries: {step_entries}")
 
     if args.moving_window_size is None:
         # default to non-overlapping windows in raw-entry space
         args.moving_window_size = step_entries * args.series_length_points
+        
+    print(f"moving_window_size: {args.moving_window_size}")
 
     rows_by_ar = defaultdict(list)
+    
+    print(f"Reading input file {args.input} ...")
     with open(args.input, "r", newline="") as f:
         rdr = csv.reader(f)
         for raw in rdr:
@@ -159,15 +164,25 @@ def main():
                 rec = parse_row(raw2)
             rows_by_ar[rec["ar"]].append(rec)
 
+    print(f"#{len(rows_by_ar)} rows read ...")
+
     data_out = []
 
+
+    
     for ar, rows in rows_by_ar.items():
+        print(f"--> Creating chunks from ar {ar} ...") 
         if args.expect_contiguous:
             chunks = contiguous_chunks(rows, args.base_cadence_min)
         else:
             chunks = [sorted(rows, key=lambda r: r["dt"])]
 
+        print(f"#{len(chunks)} chunks created for ar {ar} ...")
+
+        chunk_counter= 0 
         for chunk in chunks:
+            chunk_counter+= 1
+            
             # Build cadence-validated series windows
             series_windows = build_series_from_chunk(
                 chunk=chunk,
@@ -177,6 +192,8 @@ def main():
                 base_cadence_min=args.base_cadence_min,
                 moving_window_size=args.moving_window_size
             )
+            
+            print(f"Created #{len(series_windows)} for chunk no. {chunk_counter}/{len(chunks)} for ar {ar} ...")
 
             for seq in series_windows:
                 feat_series = {f"feat{i+1}": [] for i in range(29)}
@@ -200,6 +217,7 @@ def main():
                 }
                 data_out.append(record)
 
+    print(f"Saving data to file {args.output} ...")
     with open(args.output, "w") as f:
         json.dump({"data": data_out}, f, ensure_ascii=False, indent=2)
 
