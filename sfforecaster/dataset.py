@@ -913,7 +913,11 @@ class TSDataset(BaseDataset):
 			data_all= []
 			data_npoints= []
 			for idx in range(len(self.datalist)):
-				data= self.load_ts_var(idx, data_var, self.logstretch_vars[k])
+				try:
+					data= self.load_ts_var(idx, data_var, self.logstretch_vars[k])
+				except Exception as e:
+					logger.error(f"Failed to read ts data {idx} for var {data_var} (k={k})")
+					raise e
 				if data is None:
 					logger.error(f"Failed to read ts data {idx} for var {data_var}, skipping ...")
 					continue
