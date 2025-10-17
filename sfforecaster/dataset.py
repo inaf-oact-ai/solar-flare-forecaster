@@ -26,7 +26,7 @@ import torchvision.transforms as T
 
 # - SFFORECASTER
 from sfforecaster.utils import *
-
+from sfforecaster import logger
 
 ######################################
 ###      CLASS LABEL SCHEMA
