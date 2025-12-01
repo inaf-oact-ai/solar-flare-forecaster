@@ -97,6 +97,8 @@ def parse_args():
     p.add_argument("--include-timestamps", dest="include_timestamps", action="store_true")
     p.add_argument("--no-timestamps", dest="include_timestamps", action="store_false")
     p.set_defaults(include_timestamps=True)
+    p.add_argument("--only-matched", action="store_true", help="If set, drop items where XRS augmentation failed (xrs_flux_ratio is None).")
+    
 
     # TS-only label window configuration
     p.add_argument("--label-window-hours", type=float, default=24.0,
@@ -332,8 +334,10 @@ def main():
                 out["flare_hist"] = None
             out["xrs_error"] = str(e)
             out["xrs_satellite"] = sat_name
-            out_items.append(out)
             n_skipped += 1
+            
+            if not args.only_matched:
+                out_items.append(out)
 
     # Wrap + stats block
     out_json = {
