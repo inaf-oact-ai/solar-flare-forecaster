@@ -183,12 +183,12 @@ def slice_ratio_on_window(start: pd.Timestamp,
     ratio = (seg["science"].values.astype("float64") / day_df["background"].values.astype("float64")).astype("float32")
     return grid, ratio
     
-
+                          
 def slice_ratio_on_window_v2(start: pd.Timestamp,
                           end: pd.Timestamp,
                           sci: pd.DataFrame,
-                          bg: pd.DataFrame,
-                          min_coverage: float) -> Tuple[pd.DatetimeIndex, np.ndarray]:
+                          bg_day: pd.DataFrame,
+                          min_coverage: float) -> Tuple[pd.DatetimeIndex, np.ndarray]:                          
     start = pd.to_datetime(start, utc=True)
     end   = pd.to_datetime(end,   utc=True)
     if not (end > start):
