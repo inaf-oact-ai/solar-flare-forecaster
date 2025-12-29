@@ -357,6 +357,75 @@ class Uni2TSBatchCollator:
 				out[k] = torch.tensor(v)
 		
 		return out
+
+
+class VideoUni2TSMultimodalCollator:
+	"""
+	Compose existing collators:
+	  - VideoDataCollator   -> produces pixel_values, labels
+	  - Uni2TSBatchCollator -> produces target, observed_mask, sample_id,
+	                           time_id, variate_id, prediction_mask, labels
+
+	Expected dataset item:
+	  {"video": <list of frames>, "ts": <tensor [T,C]>, "label": <tensor/int>, "meta": <dict>}
+	"""
+
+	def __init__(
+		self,
+		image_processor,
+		do_resize=True,
+		do_normalize=True,
+		do_rescale=True,
+		context_length=1440,
+		patch_size=16,
+		drop_none=True,
+	):
+		self.video_collate = VideoDataCollator(
+			image_processor=image_processor,
+			do_resize=do_resize,
+			do_normalize=do_normalize,
+			do_rescale=do_rescale,
+		)
+		self.ts_collate = Uni2TSBatchCollator(
+			context_length=context_length,
+			patch_size=patch_size,
+		)
+		self.drop_none = drop_none
+
+	def __call__(self, batch):
+		# Drop None samples (if require_matched=False in dataset)
+		if self.drop_none:
+			batch = [b for b in batch if b is not None]
+		if len(batch) == 0:
+			return None
+
+		# Keep meta aligned with filtered samples
+		meta = [b.get("meta", None) for b in batch]
+
+		# --- Video view: list[(frames, label)]
+		video_view = [(b["video"], b["label"]) for b in batch]
+		video_out = self.video_collate(video_view)
+
+		# --- TS view: list[{"input": ts, "labels": label}]
+		ts_view = [{"input": b["ts"], "labels": b["label"]} for b in batch]
+		ts_out = self.ts_collate(ts_view)
+
+		# Sanity check: batch sizes must match
+		if "labels" in video_out and "labels" in ts_out:
+			if video_out["labels"].shape[0] != ts_out["labels"].shape[0]:
+				raise ValueError(
+					f"Video/TS batch size mismatch after collation: "
+					f"{video_out['labels'].shape[0]} vs {ts_out['labels'].shape[0]}"
+				)
+
+		# Merge outputs (keep ONE labels tensor: ts_out overwrites video_out)
+		out = {}
+		out.update(video_out)
+		out.update(ts_out)
+		out["meta"] = meta
+
+		return out
+
 	
 ##########################################
 ##    FOCAL LOSS

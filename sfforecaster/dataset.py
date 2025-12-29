@@ -1047,3 +1047,215 @@ class TSDataset(BaseDataset):
 		
 		return ts_tensor, class_id_tensor	
 		
+
+
+######################################
+###  MULTI-MODAL DATASET CLASS
+######################################
+class _VideoLoader(BaseVisDataset):
+	"""Internal helper that reuses :class:`BaseVisDataset` methods without
+	reading the JSON file again.
+
+	The outer multimodal dataset owns `datalist`; this helper just consumes it.
+	"""
+
+	def __init__(
+		self,
+		datalist,
+		transform=None,
+		verbose=False,
+		load_as_gray=False,
+		apply_zscale=False,
+		zscale_contrast=0.25,
+		resize=False,
+		resize_size=224,
+		apply_asinh_stretch=False,
+		pmin=0.5,
+		pmax=99.5,
+		asinh_scale=0.5,
+	):
+		# NOTE: do NOT call BaseDataset/BaseVisDataset __init__ (it would re-read JSON)
+		self.filename = None
+		self.datalist = datalist
+		self.transform = transform
+		self.verbose = verbose
+		self.load_as_gray = load_as_gray
+		self.apply_zscale = apply_zscale
+		self.zscale_contrast = zscale_contrast
+		self.resize = resize
+		self.resize_size = resize_size
+		self.apply_asinh_stretch = apply_asinh_stretch
+		self.pmin = pmin
+		self.pmax = pmax
+		self.asinh_scale = asinh_scale
+		
+class _TSLoader(TSDataset):
+	"""Internal helper that reuses :class:`TSDataset` time-series loading without
+	reading the JSON file again.
+
+	The outer multimodal dataset owns `datalist`; this helper just consumes it.
+	"""
+
+	def __init__(
+		self,
+		datalist,
+		transform=None,
+		verbose=False,
+		data_vars=("xrs_flux_ratio", "flare_hist"),
+		logstretch_vars=(False, False),
+		npoints=1440,
+	):
+		# NOTE: do NOT call BaseDataset/TSDataset __init__ (it would re-read JSON)
+		self.filename = None
+		self.datalist = datalist
+		self.transform = transform
+		self.verbose = verbose
+		self.data_vars = list(data_vars)
+		self.logstretch_vars = list(logstretch_vars)
+		self.data_var_stats = {}
+		self.npoints = npoints
+		
+		
+class MultimodalDataset(BaseDataset):
+	"""Multimodal dataset returning (video, time-series, label).
+
+	This reuses the existing video/ts loading
+	logic but keep a single source of truth for `datalist` and label handling.
+
+	Returned sample is a dict:
+		{
+		  "video": <list[tensor] or tensor>,
+		  "ts": <tensor [T,C]>,
+		  "label": <tensor>,
+		  "meta": <dict>
+		}
+	"""
+
+	def __init__(
+		self,
+		filename,
+		video_transform=None,
+		ts_transform=None,
+		verbose=False,
+		# --- video loader options (mirrors BaseVisDataset)
+		load_as_gray=False,
+		apply_zscale=False,
+		zscale_contrast=0.25,
+		resize=False,
+		resize_size=224,
+		apply_asinh_stretch=False,
+		pmin=0.5,
+		pmax=99.5,
+		asinh_scale=0.5,
+		# --- ts loader options (mirrors TSDataset)
+		data_vars=("xrs_flux_ratio", "flare_hist"),
+		logstretch_vars=(False, False),
+		npoints=1440,
+		# --- label options (mirrors VideoDataset/TSDataset)
+		nclasses=None,
+		id2target=None,
+		multiout=False,
+		multilabel=False,
+		ordinal=False,
+		# --- multimodal options
+		require_matched=True,
+	):
+		super().__init__(filename=filename, transform=None, verbose=verbose)
+
+		# - Check nclasses
+		if nclasses is None:
+			if id2target is not None:
+				nclasses = len(id2target)
+			else:
+				raise ValueError("nclasses is None and id2target not provided; cannot infer number of classes.")
+
+		# - Validate flags
+		if multilabel and ordinal:
+			raise ValueError("Invalid config: multilabel=True and ordinal=True are mutually exclusive.")
+
+		self.nclasses = nclasses
+		self.id2target = id2target
+		self.mlb = MultiLabelBinarizer(classes=np.arange(0, self.nclasses))
+		self.multiout = multiout
+		self.multilabel = multilabel
+		self.ordinal = ordinal
+		self.require_matched = require_matched
+
+		# - Create modality loaders that reuse existing logic but share datalist
+		self._video = _VideoLoader(
+			datalist=self.datalist,
+			transform=video_transform,
+			verbose=verbose,
+			load_as_gray=load_as_gray,
+			apply_zscale=apply_zscale,
+			zscale_contrast=zscale_contrast,
+			resize=resize,
+			resize_size=resize_size,
+			apply_asinh_stretch=apply_asinh_stretch,
+			pmin=pmin,
+			pmax=pmax,
+			asinh_scale=asinh_scale,
+		)
+		self._ts = _TSLoader(
+			datalist=self.datalist,
+			transform=ts_transform,
+			verbose=verbose,
+			data_vars=data_vars,
+			logstretch_vars=logstretch_vars,
+			npoints=npoints,
+		)
+
+		# - Optional filtering for matched samples
+		if self.require_matched:
+			self._filter_unmatched_inplace()
+
+	def _filter_unmatched_inplace(self):
+		"""Drop samples with missing video frames or ts variables."""
+		filtered = []
+		for s in self.datalist:
+			# video: require filepaths present and non-empty
+			if "filepaths" not in s or s.get("filepaths") is None or len(s.get("filepaths")) == 0:
+				continue
+			# ts: require each var present and not None
+			ok_ts = True
+			for v in self._ts.data_vars:
+				if v not in s or s.get(v) is None:
+					ok_ts = False
+					break
+			if not ok_ts:
+				continue
+			filtered.append(s)
+		self.datalist = filtered
+		# keep helpers in sync
+		self._video.datalist = self.datalist
+		self._ts.datalist = self.datalist
+
+	def _load_label_tensor(self, idx):
+		"""Match label logic used across existing datasets."""
+		if self.multiout:
+			if self.multilabel:
+				return self.load_hotenc_targets(idx, self.id2target, self.mlb)
+			elif self.ordinal:
+				raise ValueError("Ordinal training not implemented/supported for multilabel/multiout!")
+			else:
+				class_id = self.load_targets(idx, self.id2target)
+				return torch.tensor(class_id, dtype=torch.long)
+		else:
+			if self.multilabel:
+				return self.load_hotenc_target(idx, self.id2target, self.mlb)
+			elif self.ordinal:
+				return self.load_ordinal_target(idx, self.nclasses)
+			else:
+				class_id = self.load_target(idx, self.id2target)
+				return torch.tensor(class_id, dtype=torch.long)
+
+	def __getitem__(self, idx):
+		video = self._video.load_video(idx)
+		ts = self._ts.load_ts_tensor(idx)
+		if video is None or ts is None:
+			# If require_matched=False you might still want to skip on the fly.
+			# Returning None lets a custom collate_fn drop it.
+			return None
+		label = self._load_label_tensor(idx)
+		meta = self.load_image_info(idx)
+		return {"video": video, "ts": ts, "label": label, "meta": meta}

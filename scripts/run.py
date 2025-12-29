@@ -52,12 +52,14 @@ from sfforecaster.model import MultiHorizonVideoMAE, MoiraiForSequenceClassifica
 from sfforecaster.utils import *
 from sfforecaster.dataset import get_target_maps
 from sfforecaster.dataset import VideoDataset, ImgDataset, ImgStackDataset, TSDataset
+from sfforecaster.dataset import MultimodalDataset
 from sfforecaster.custom_transforms import FlippingTransform, Rotate90Transform, RandomCenterCrop
 from sfforecaster.custom_transforms import VideoFlipping, VideoResize, VideoNormalize, VideoRotate90, VideoRandomCenterCrop
 from sfforecaster.metrics import build_multi_label_metrics, build_single_label_metrics, build_ordinal_metrics
 from sfforecaster.trainer import CustomTrainer, CustomTrainerTS, TrainMetricsCallback, CudaGCCallback
-from sfforecaster.trainer import VideoDataCollator, ImgDataCollator, TSDataCollator, Uni2TSBatchCollator
+from sfforecaster.trainer import VideoDataCollator, ImgDataCollator, TSDataCollator, Uni2TSBatchCollator, VideoUni2TSMultimodalCollator
 from sfforecaster.model import CoralOrdinalHead
+from sfforecaster.model import MultimodalConcatMLP
 from sfforecaster.inference import coral_logits_to_class_probs, coral_decode_with_thresholds
 from sfforecaster.inference import load_img_for_inference, load_video_for_inference, load_ts_for_inference
 from sfforecaster.metrics import binary_curves_from_probs
@@ -127,7 +129,7 @@ def get_args():
 	parser.add_argument('-min_crop_fract', '--min_crop_fract', dest='min_crop_fract', required=False, type=float, default=0.65, action='store', help='Mininum crop fraction (default=0.65).')
 	
 	# - Model options (GENERAL)
-	parser.add_argument("--data_modality", dest='data_modality', type=str, choices=["image", "video", "ts"], default="image", help="Data modality model used")
+	parser.add_argument("--data_modality", dest='data_modality', type=str, choices=["image", "video", "ts", "multimodal"], default="image", help="Data modality model used")
 	parser.add_argument('-model', '--model', dest='model', required=False, type=str, default="google/siglip-so400m-patch14-384", action='store', help='Model pretrained file name or weight path to be loaded {google/siglip-large-patch16-256, google/siglip-base-patch16-256, google/siglip-base-patch16-256-i18n, google/siglip-so400m-patch14-384, google/siglip-base-patch16-224, MCG-NJU/videomae-base, MCG-NJU/videomae-large, OpenGVLab/VideoMAEv2-Large}')
 	
 	parser.add_argument('--binary', dest='binary', action='store_true',help='Choose binary classification label scheme (default=false)')	
@@ -164,6 +166,15 @@ def get_args():
 	parser.set_defaults(ts_freeze_backbone=False)
 	parser.add_argument('-ts_max_freeze_layer_id', '--ts_max_freeze_layer_id', dest='ts_max_freeze_layer_id', required=False, type=int, default=-1, action='store',help='ID of the last layer kept frozen. -1 means all are frozen if --ts_freeze_backbone option is enabled (default=-1)')
 	
+	# - Model options (MULTIMODAL)
+	parser.add_argument("--mm_fusion", dest="mm_fusion", type=str, choices=["concat_mlp"], default="concat_mlp", help="Multimodal fusion strategy")
+	parser.add_argument("--mm_hidden_dim", dest="mm_hidden_dim", type=int, default=512, help="Hidden dim for multimodal fusion MLP")
+	parser.add_argument("--require_matched", dest="require_matched", action="store_true", help="Use only samples with both video and TS present")
+	parser.set_defaults(require_matched=False)
+	parser.add_argument("--mm_ckpt", dest="mm_ckpt", required=False, type=str, default="", action="store", help="Path to multimodal checkpoint (dir/.bin/.safetensors). If set, loads fusion weights after building model.")
+	parser.add_argument("--video_ckpt", dest="video_ckpt", required=False, type=str, default="", action="store", help="Path to trained video checkpoint (dir/.bin/.safetensors) to init video branch.")
+	parser.add_argument("--ts_ckpt", dest="ts_ckpt", required=False, type=str, default="", action="store", help="Path to trained ts checkpoint (dir/.bin/.safetensors) to init ts branch.")
+	parser.add_argument("--mm_init", dest="mm_init", required=False, type=str, default="unimodal", choices=["pretrained", "unimodal", "multimodal"], help="How to initialize multimodal training: pretrained backbones only, from unimodal ckpts, or from mm_ckpt.")
 	
 	# - Model training options
 	parser.add_argument('--run_eval_on_start', dest='run_eval_on_start', action='store_true',help='Run model evaluation on start for debug (default=false)')	
@@ -518,29 +529,19 @@ def load_videomae_model(
 	label2id,
 	num_labels,
 	nclasses,
-	inference_mode=False
+	inference_mode=False,
+	ckpt_override=""
 ):
 	""" Load video model & processor """
-	
-	# - Override config
-	#cfg = VideoMAEConfig.from_pretrained(args.model)
-	#if args.enc_attn_dropout is not None:
-	#	if hasattr(cfg, "attention_probs_dropout_prob"):
-	#		cfg.attention_probs_dropout_prob = float(args.enc_attn_dropout)
-	#	elif hasattr(cfg, "attention_dropout"):
-	#		cfg.attention_dropout = float(args.enc_attn_dropout)
-
-	#if args.enc_hidden_dropout is not None and hasattr(cfg, "hidden_dropout_prob"):
-	#	cfg.hidden_dropout_prob = float(args.enc_hidden_dropout)
 	
 	if inference_mode:
 		# - Load model for inference
 		model = VideoMAEForVideoClassification.from_pretrained(args.model)
-		#model = VideoMAEForVideoClassification.from_pretrained(args.model, config=cfg)
 		
 		# - Ensure head matches the checkpoint if it was trained with Dropout+Linear
 		try:
-			state = load_state_dict_any(args.model)  # works with checkpoint dir or .bin/.safetensors
+			ckpt = ckpt_override if ckpt_override else args.model
+			state = load_state_dict_any(ckpt) # works with checkpoint dir or .bin/.safetensors
 			needs_seq_head = any(k.startswith("classifier.1.") for k in state.keys())
 			has_plain_linear = hasattr(model, "classifier") and isinstance(model.classifier, torch.nn.Linear)
 			logger.info(f"needs_seq_head? {needs_seq_head}, has_plain_linear? {has_plain_linear}")
@@ -561,7 +562,6 @@ def load_videomae_model(
 		try:
 			if args.binary:
 				model = VideoMAEForVideoClassification.from_pretrained(args.model, num_labels=1) # tmp
-				#model = VideoMAEForVideoClassification.from_pretrained(args.model, num_labels=1, config=cfg) # tmp
 				in_features = model.classifier.in_features
 				model.classifier = torch.nn.Linear(in_features, 1)
 				model.config.num_labels = 1
@@ -688,7 +688,8 @@ def load_video_model(
 	label2id,
 	num_labels,
 	nclasses,
-	inference_mode=False
+	inference_mode=False,
+	ckpt_override: str = ""
 ):
 	""" Load video model & processor """
 	
@@ -699,7 +700,8 @@ def load_video_model(
 			label2id=label2id,
 			num_labels=num_labels,
 			nclasses=nclasses,
-			inference_mode=inference_mode
+			inference_mode=inference_mode,
+			ckpt_override= ckpt_override,
 		)
 	elif args.video_model=="imgfeatts":
 		return load_imgfeatts_model(
@@ -720,7 +722,8 @@ def load_ts_model(
 	label2id,
 	num_labels,
 	nclasses,
-	inference_mode=False
+	inference_mode=False,
+	ckpt_override=""
 ):
 	"""Load Moirai model for time-series classification (Trainer-compatible)."""
 
@@ -733,6 +736,7 @@ def load_ts_model(
 		pretrained_name=args.model_ts_backbone,
 		num_labels=num_out,
 		freeze_backbone=args.ts_freeze_backbone,
+		max_freeze_layer_id=args.args.ts_max_freeze_layer_id,
 		patching_mode=args.ts_patching_mode
 	)
 	
@@ -773,7 +777,9 @@ def load_ts_model(
   # - Inference?
 	if inference_mode:
 	  # - Load trained checkpoint (weights + config)
-		ckpt = args.model  # can be a file OR a checkpoint dir
+		ckpt = ckpt_override if ckpt_override else args.model # can be a file OR a checkpoint dir
+		state = load_state_dict_any(ckpt)
+		
 		logger.info(f"Loading weights from path {args.model} ...")
 		state = load_state_dict_any(ckpt)
 		
@@ -794,6 +800,133 @@ def load_ts_model(
 	ts_processor = None
 
 	return model, ts_processor
+	
+
+def load_multimodal_model(
+	args,
+	id2label,
+	label2id,
+	num_labels,
+	nclasses,
+	inference_mode=False
+):
+	""" Load multimodal video-ts model """
+	
+	num_out = (1 if args.binary else num_labels)
+
+	# Decide init strategy
+	mm_init = getattr(args, "mm_init", "unimodal")
+	mm_ckpt = getattr(args, "mm_ckpt", "")
+	video_ckpt = getattr(args, "video_ckpt", "")
+	ts_ckpt = getattr(args, "ts_ckpt", "")
+
+	# -----------------------
+	# 1) Build / init branches
+	# -----------------------
+	if mm_init == "pretrained":
+		# Use pretrained weights only (no branch ckpts)
+		video_model, _vp = load_video_model(
+			args=args,
+			id2label=id2label,
+			label2id=label2id,
+			num_labels=num_labels,
+			nclasses=nclasses,
+			inference_mode=False,
+			ckpt_override=""
+		)
+		ts_model, _tp = load_ts_model(
+			args=args,
+			id2label=id2label,
+			label2id=label2id,
+			num_labels=num_labels,
+			nclasses=nclasses,
+			inference_mode=False,
+			ckpt_override=""
+		)
+
+	elif mm_init == "unimodal":
+		# Init from separately trained unimodal ckpts (if provided), otherwise pretrained
+		video_model, _vp = load_video_model(
+			args=args,
+			id2label=id2label,
+			label2id=label2id,
+			num_labels=num_labels,
+			nclasses=nclasses,
+			inference_mode=(True if video_ckpt else False),
+			ckpt_override=video_ckpt
+		)
+		ts_model, _tp = load_ts_model(
+			args=args,
+			id2label=id2label,
+			label2id=label2id,
+			num_labels=num_labels,
+			nclasses=nclasses,
+			inference_mode=(True if ts_ckpt else False),
+			ckpt_override=ts_ckpt
+		)
+
+	elif mm_init == "multimodal":
+		# For multimodal ckpt init we still need a *skeleton* model.
+		# Build branches from pretrained or from branch ckpts if provided.
+		video_model, _vp = load_video_model(
+			args=args,
+			id2label=id2label,
+			label2id=label2id,
+			num_labels=num_labels,
+			nclasses=nclasses,
+			inference_mode=(True if video_ckpt else False),
+			ckpt_override=video_ckpt
+		)
+		ts_model, _tp = load_ts_model(
+			args=args,
+			id2label=id2label,
+			label2id=label2id,
+			num_labels=num_labels,
+			nclasses=nclasses,
+			inference_mode=(True if ts_ckpt else False),
+			ckpt_override=ts_ckpt
+		)
+	else:
+		raise ValueError(f"Invalid mm_init={mm_init}")
+
+	# -----------------------
+	# 2) Build fusion model
+	# -----------------------
+	model = MultimodalConcatMLP(
+		video_model=video_model,
+		ts_model=ts_model,
+		num_labels=num_out,
+		hidden_dim=args.mm_hidden_dim,
+		dropout=args.head_dropout,
+		freeze_video_backbone=args.freeze_backbone,
+		max_freeze_video_layer_id=args.max_freeze_layer_id,
+		freeze_ts_backbone=args.ts_freeze_backbone,
+		max_freeze_ts_layer_id=args.ts_max_freeze_layer_id,
+	)
+
+	# -----------------------
+	# 3) If mm_ckpt is provided (or init==multimodal), load fusion checkpoint
+	# -----------------------
+	# This loads the whole multimodal state dict (proj/head + possibly branches).
+	# You can control strictness depending on whether ckpt contains full branches.
+	ckpt_to_load = ""
+	if inference_mode and mm_ckpt:
+		ckpt_to_load = mm_ckpt
+	elif (mm_init == "multimodal") and mm_ckpt:
+		ckpt_to_load = mm_ckpt
+
+	if ckpt_to_load:
+		logger.info(f"Loading multimodal checkpoint from {ckpt_to_load} ...")
+		state = load_state_dict_any(ckpt_to_load)
+		missing, unexpected = model.load_state_dict(state, strict=False)
+		if missing or unexpected:
+			print(f"[load_multimodal_model] load_state_dict -> missing: {missing[:10]} ... | unexpected: {unexpected[:10]} ...")
+		model.eval() if inference_mode else None
+
+	# Processor: for multimodal we need the VIDEO processor
+	image_processor = AutoImageProcessor.from_pretrained(args.model) if args.use_model_processor else None
+
+	return model, image_processor
 	
 			
 def load_model(
@@ -818,6 +951,9 @@ def load_model(
 		logger.info("Loading ts model & processor (name=%s) ..." % (args.model_ts_backbone))
 		return load_ts_model(args, id2label, label2id, num_labels, nclasses, inference_mode)
 		
+	elif args.data_modality=="multimodal":
+		logger.info(f"Loading multimodal model (ConcatMLP: video={args.model}, ts={args.model_ts_backbone}) ...")
+		return load_multimodal_model(args, id2label, label2id, num_labels, nclasses, inference_mode)
 	else:
 		raise ValueError(f"Data modality {args.data_modality} not supported!")
 
@@ -1020,6 +1156,8 @@ def load_dataset(
 		logger.warning("No transforms are implemented for time-series data ...")
 		transform_train= None
 		transform_valtest= None
+	elif args.data_modality=="multimodal":
+		transform_train, transform_valtest= load_video_transform(args, image_processor)
 	else:
 		raise ValueError(f"Data modality {args.data_modality} not supported!")
 		
@@ -1039,6 +1177,8 @@ def load_dataset(
 		DatasetClass= VideoDataset
 	elif args.data_modality=="ts":
 		DatasetClass= TSDataset
+	elif args.data_modality=="multimodal":
+		DatasetClass= MultimodalDataset
 	else:
 		raise ValueError(f"Data modality {args.data_modality} not supported!")
 	
@@ -1086,6 +1226,23 @@ def load_dataset(
 			npoints=args.ts_npoints
 		)
 		
+	elif args.data_modality=="multimodal":
+		dataset = DatasetClass(
+			filename=args.datalist,
+			video_transform=transform,	# keep None if your BaseVisDataset handles preprocessing internally
+			ts_transform=None,
+			verbose=args.verbose,
+			data_vars=tuple(args.ts_vars.split(",")) if isinstance(args.ts_vars, str) else tuple(args.ts_vars),
+			logstretch_vars=tuple([bool(int(x)) for x in args.ts_logstretchs.split(",")]) if isinstance(args.ts_logstretchs, str) else tuple(args.ts_logstretchs),
+			npoints=int(args.ts_npoints),
+			nclasses=args.nclasses,
+			id2target=id2target,
+			multiout=args.multiout,
+			multilabel=args.multilabel,
+			ordinal=args.ordinal,
+			require_matched=args.require_matched,
+		)
+		
 	nsamples= dataset.get_sample_size()
 	
 	logger.info("#%d entries in dataset ..." % (nsamples))
@@ -1123,6 +1280,22 @@ def load_dataset(
 				data_vars=ts_vars,
 				logstretch_vars=ts_logstretchs,
 				npoints=args.ts_npoints
+			)
+		elif args.data_modality=="multimodal":
+			dataset_cv = DatasetClass(
+				filename=args.datalist_cv,
+				video_transform=transform_valtest,	# keep None if your BaseVisDataset handles preprocessing internally
+				ts_transform=None,
+				verbose=args.verbose,
+				data_vars=tuple(args.ts_vars.split(",")) if isinstance(args.ts_vars, str) else tuple(args.ts_vars),
+				logstretch_vars=tuple([bool(int(x)) for x in args.ts_logstretchs.split(",")]) if isinstance(args.ts_logstretchs, str) else tuple(args.ts_logstretchs),
+				npoints=int(args.ts_npoints),
+				nclasses=args.nclasses,
+				id2target=id2target,
+				multiout=args.multiout,
+				multilabel=args.multilabel,
+				ordinal=args.ordinal,
+				require_matched=args.require_matched,
 			)
 		
 		nsamples_cv= dataset_cv.get_sample_size()
@@ -1321,6 +1494,7 @@ def run_predict(
 	args,
 	id2label,
 	image_processor=None,
+	data_collator=None,
 	device="cuda:0"
 ):
 	""" Run model predict """
@@ -1378,21 +1552,35 @@ def run_predict(
 			if input_batch is None:
 				logger.warning("Skip None input batch at index %d ..." % (i))
 				continue
+				
+		elif args.data_modality=="multimodal":
+			if data_collator is None:
+				raise ValueError("run_predict multimodal requires data_collator (VideoUni2TSMultimodalCollator).")
+
+			item = dataset[i]
+			if item is None:
+				logger.warning("Skip None item at index %d ..." % (i))
+				continue
+
+			input_batch = data_collator([item])
+			if input_batch is None:
+				logger.warning("Skip None collated batch at index %d ..." % (i))
+				continue		
+				
 		else:
 			raise ValueError(f"Data modality {args.data_modality} not supported!")
 						
 		###input_tensor= input_tensor.unsqueeze(0).to(device)
 		#input_tensor= input_tensor.to(device)
- 
-		if args.data_modality == "ts":
-			input_batch = {k: v.to(device) for k, v in input_batch.items()}
+ 	
+		if args.data_modality in ["ts", "multimodal"]:
+			input_batch = {k: (v.to(device) if torch.is_tensor(v) else v) for k, v in input_batch.items()}
 		else:
 			input_tensor = input_tensor.to(device)
  
  		# - Compute model outputs
 		with torch.no_grad():
-			##outputs = model(input_tensor)
-			if args.data_modality == "ts":
+			if args.data_modality in ["ts", "multimodal"]:
 				outputs = model(**input_batch)
 			else:
 				outputs = model(input_tensor)
@@ -1741,6 +1929,19 @@ def main():
 			patch_size=patch_size,
 		)
 	
+	elif args.data_modality=="multimodal":
+		# patch_size from Moirai backbone, fallback to 32
+		patch_size = getattr(getattr(model, "ts_backbone", None), "patch_size", 32)
+
+		data_collator = VideoUni2TSMultimodalCollator(
+			image_processor=image_processor if args.use_model_processor else None, 
+			do_resize=image_processor.do_resize if args.use_model_processor else False,                   # set to True only if processor should resize
+			do_normalize=image_processor.do_normalize if args.use_model_processor else False,              # set to True only if processor should normalize
+			do_rescale=image_processor.do_rescale if args.use_model_processor else False,                  # set to True only if processor should rescale
+			context_length=int(args.ts_npoints),
+			patch_size=int(patch_size),
+			drop_none=True,
+		)
 	
 	else:
 		raise ValueError(f"Data modality {args.data_modality} not supported!")
@@ -1946,7 +2147,7 @@ def main():
 	# - Run predict
 	elif args.predict:
 		logger.info("Running model inference on input data %s ..." % (args.datalist))
-		run_predict(model, dataset, args, id2label, image_processor, device=device)
+		run_predict(model, dataset, args, id2label, image_processor, data_collator=data_collator, device=device)
 	
 	################################
 	##    TRAIN

@@ -187,10 +187,13 @@ class MoiraiForSequenceClassification(torch.nn.Module):
 		pretrained_name: str = "Salesforce/moirai-2.0-R-small",
 		num_labels: int = 4, 
 		freeze_backbone: bool = False,
+		max_freeze_layer_id: int = -1,
 		patching_mode: str = "time_only" # "time_only" | "time_variate"
 	):
 		super().__init__()
 		self.backbone = _M.from_pretrained(pretrained_name)
+		self.freeze_backbone= freeze_backbone
+		self.max_freeze_layer_id= max_freeze_layer_id
 		
 		assert patching_mode in ("time_only", "time_variate")
 		self.patching_mode = patching_mode
@@ -201,8 +204,18 @@ class MoiraiForSequenceClassification(torch.nn.Module):
 		#print(self.config.num_labels)
 
 		if freeze_backbone:
-			for p in self.backbone.parameters():
-				p.requires_grad = False
+			#for p in self.backbone.parameters():
+			#	p.requires_grad = False
+			logger.info("Freezing Moirai encoder ...")	
+			encoder_name= "encoder"
+			layer_search_pattern= "layers"
+
+			for name, param in self.backbone.named_parameters():
+				if name.startswith(encoder_name):
+					layer_index= extract_layer_id(name, layer_search_pattern)
+					if self.max_freeze_layer_id==-1 or (self.max_freeze_layer_id>=0 and layer_index!=-1 and layer_index<self.max_freeze_layer_id):
+						print(f"Freezing Moirai layer {name} ...")
+						param.requires_grad = False	
 
 		# - Try to make the backbone emit representations
 		for attr in ("return_repr", "output_hidden_states", "return_hidden"):
@@ -1044,5 +1057,190 @@ class ImageFeatTSClassifier(torch.nn.Module):
 		#logits = self.classifier(pooled)                         # [B, num_labels]
 		logits = self.classifier(self.dropout(pooled))
 		
+		return SequenceClassifierOutput(logits=logits)
+	
+	
+
+###############################################
+###   MULTIMODAL CONCAT + MLP
+###############################################
+
+class MultimodalConcatMLP(torch.nn.Module):
+	"""
+	Multimodal fusion:
+		VideoMAE encoder -> z_v  [B, Dv]
+		Moirai encoder   -> z_t  [B, Dt]
+		concat([z_v,z_t]) -> MLP -> logits
+
+	Expected batch keys (from VideoUni2TSMultimodalCollator):
+		- pixel_values
+		- target, observed_mask, sample_id, time_id, variate_id, prediction_mask
+		- labels (used by CustomTrainer, not here)
+	"""
+
+	def __init__(
+		self,
+		video_model,
+		ts_model,
+		num_labels: int,
+		hidden_dim: int = 512,
+		dropout: float = 0.1,
+		freeze_video_backbone: bool = False,
+		max_freeze_video_layer_id: int = -1,
+		freeze_ts_backbone: bool = False,
+		max_freeze_ts_layer_id: int = -1,
+	):
+		super().__init__()
+
+		# --- Video encoder (VideoMAE)
+		self.video_model = video_model
+		self.video_hidden = int(self.video_model.config.hidden_size)
+		self.freeze_video_backbone= freeze_video_backbone
+		self.max_freeze_video_layer_id= max_freeze_video_layer_id
+
+		# --- TS encoder (Moirai backbone)
+		self.ts_model = ts_model
+		self.ts_backbone = getattr(ts_model, "backbone", ts_model)
+		self.freeze_ts_backbone= freeze_ts_backbone
+		self.max_freeze_ts_layer_id= max_freeze_ts_layer_id
+
+		# Try to infer Moirai repr dim from config; otherwise lazy-init later
+		self.ts_hidden = getattr(getattr(self.ts_backbone, "config", None), "d_model", None)
+		if self.ts_hidden is None:
+			self.ts_hidden = getattr(getattr(self.ts_backbone, "config", None), "hidden_size", None)
+		self._ts_hidden_inferred = False # If still None, we'll infer at first forward pass
+
+		# --- Fusion head
+		ts_dim = int(self.ts_hidden) if self.ts_hidden is not None else hidden_dim
+
+		self._proj_v = torch.nn.Sequential(
+			torch.nn.LayerNorm(self.video_hidden),
+			torch.nn.Linear(self.video_hidden, hidden_dim),
+			torch.nn.GELU(),
+			torch.nn.Dropout(dropout),
+		)
+
+		self._proj_t = torch.nn.Sequential(
+			torch.nn.LayerNorm(ts_dim),
+			torch.nn.Linear(ts_dim, hidden_dim),
+			torch.nn.GELU(),
+			torch.nn.Dropout(dropout),
+		)
+
+		self._head = torch.nn.Sequential(
+			torch.nn.LayerNorm(2 * hidden_dim),
+			torch.nn.Linear(2 * hidden_dim, hidden_dim),
+			torch.nn.GELU(),
+			torch.nn.Dropout(dropout),
+			torch.nn.Linear(hidden_dim, num_labels),
+		)
+
+		# --- Freezing backbone?
+		if freeze_video_backbone:
+			self._freeze_videomae(max_freeze_video_layer_id)
+
+		if freeze_ts_backbone:
+			self._freeze_moirai(max_freeze_ts_layer_id)
+
+	def _freeze_videomae(self, max_freeze_layer_id: int):
+		""" Freeze video MAE backbone """
+		logger.info("Freezing video model base layers ...")
+		encoder_name = "encoder"
+		layer_search_pattern = "layer"
+
+		for name, param in self.video_model.base_model.named_parameters():
+			if name.startswith(encoder_name):
+				layer_index = extract_layer_id(name, layer_search_pattern)
+				if max_freeze_layer_id == -1 or (layer_index != -1 and layer_index < max_freeze_layer_id):
+					param.requires_grad = False
+
+	def _freeze_moirai(self, max_freeze_layer_id: int):
+		""" Freeze Moirai backbone """
+		logger.info("Freezing Moirai encoder layers ...")
+		encoder_name = "encoder"
+		layer_search_pattern = "layers"
+
+		for name, param in self.ts_backbone.named_parameters():
+			if name.startswith(encoder_name):
+				layer_index = extract_layer_id(name, layer_search_pattern)
+				if max_freeze_layer_id == -1 or (layer_index != -1 and layer_index < max_freeze_layer_id):
+					param.requires_grad = False
+
+	def _get_videomae_vec(self, pixel_values: torch.Tensor) -> torch.Tensor:
+		# Always pull encoder reps, not classifier output
+		out = self.video_model.base_model(pixel_values=pixel_values, return_dict=True)
+		hs = out.last_hidden_state	# [B, N, D]
+		return hs[:, 0, :]			# CLS
+
+	def _get_moirai_reprs(self, out):
+		if hasattr(out, "reprs"):
+			return out.reprs
+		return out
+
+	def _pool_moirai(self, reprs: torch.Tensor, observed_mask: torch.Tensor, prediction_mask: torch.Tensor) -> torch.Tensor:
+		if reprs.dim() == 2:
+			raise RuntimeError("Packed reprs [B*L,D] must be reshaped before pooling.")
+		if reprs.dim() != 3:
+			raise RuntimeError(f"Unexpected reprs shape: {tuple(reprs.shape)}")
+
+		obs = observed_mask
+		valid_obs = obs.any(dim=-1) if obs.dim() == 3 else obs
+		valid = valid_obs & (~prediction_mask)
+		m = valid.float().unsqueeze(-1)
+		den = m.sum(dim=1).clamp_min(1.0)
+		return (reprs * m).sum(dim=1) / den
+
+	def forward(
+		self,
+		pixel_values=None,
+		target=None,
+		observed_mask=None,
+		sample_id=None,
+		time_id=None,
+		variate_id=None,
+		prediction_mask=None,
+		labels=None,
+		**kwargs,
+	):
+		if pixel_values is None:
+			raise KeyError("Expected 'pixel_values' in inputs.")
+
+		z_v = self._get_videomae_vec(pixel_values)
+
+		if target is None or observed_mask is None or sample_id is None or time_id is None or variate_id is None or prediction_mask is None:
+			raise KeyError("Expected Uni2TS packed keys: target/observed_mask/sample_id/time_id/variate_id/prediction_mask")
+
+		out = self.ts_backbone(
+			target,
+			observed_mask,
+			sample_id,
+			time_id,
+			variate_id,
+			prediction_mask,
+			True,
+		)
+
+		reprs = self._get_moirai_reprs(out)
+		if reprs.dim() == 2:
+			B, L = sample_id.shape
+			reprs = reprs.view(B, L, -1)
+
+		if (self.ts_hidden is None) and (not self._ts_hidden_inferred):
+			self.ts_hidden = int(reprs.size(-1))
+			self._ts_hidden_inferred = True
+			self._proj_t = torch.nn.Sequential(
+				torch.nn.LayerNorm(self.ts_hidden),
+				torch.nn.Linear(self.ts_hidden, self._proj_v[1].out_features),
+				torch.nn.GELU(),
+				torch.nn.Dropout(self._proj_v[-1].p),
+			)
+
+		z_t = self._pool_moirai(reprs, observed_mask, prediction_mask)
+
+		h_v = self._proj_v(z_v)
+		h_t = self._proj_t(z_t)
+		h = torch.cat([h_v, h_t], dim=-1)
+		logits = self._head(h)
+
 		return SequenceClassifierOutput(logits=logits)
 		
