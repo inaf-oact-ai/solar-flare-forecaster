@@ -983,6 +983,9 @@ def freeze_model(model, args):
 		layer_search_pattern= "layer"
 		model_base= model.base_model
 		
+	elif args.data_modality=="multimodal":	# Nothing to be done (freezing done internally) 
+		return model
+		
 	else: # Nothing to be done
 		encoder_name= "encoder"
 		layer_search_pattern= "layer"
