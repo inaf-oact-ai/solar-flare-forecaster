@@ -846,15 +846,20 @@ def load_multimodal_model(
 
 	elif mm_init == "unimodal":
 		# Init from separately trained unimodal ckpts (if provided), otherwise pretrained
+		video_inference_mode= (True if video_ckpt else False)
 		video_model, _vp = load_video_model(
 			args=args,
 			id2label=id2label,
 			label2id=label2id,
 			num_labels=num_labels,
 			nclasses=nclasses,
-			inference_mode=(True if video_ckpt else False),
+			inference_mode=video_inference_mode,
 			ckpt_override=video_ckpt
 		)
+		if video_inference_mode and not inference_mode:
+			video_model.train()
+		
+		ts_inference_mode= (True if ts_ckpt else False)
 		ts_model, _tp = load_ts_model(
 			args=args,
 			id2label=id2label,
@@ -864,6 +869,8 @@ def load_multimodal_model(
 			inference_mode=(True if ts_ckpt else False),
 			ckpt_override=ts_ckpt
 		)
+		if ts_inference_mode and not inference_mode:
+			ts_model.train()
 
 	elif mm_init == "multimodal":
 		# For multimodal ckpt init we still need a *skeleton* model.
