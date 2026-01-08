@@ -736,7 +736,7 @@ def load_ts_model(
 		pretrained_name=args.model_ts_backbone,
 		num_labels=num_out,
 		freeze_backbone=args.ts_freeze_backbone,
-		max_freeze_layer_id=args.args.ts_max_freeze_layer_id,
+		max_freeze_layer_id=args.ts_max_freeze_layer_id,
 		patching_mode=args.ts_patching_mode
 	)
 	
@@ -961,6 +961,7 @@ def load_model(
 	elif args.data_modality=="multimodal":
 		logger.info(f"Loading multimodal model (ConcatMLP: video={args.model}, ts={args.model_ts_backbone}) ...")
 		return load_multimodal_model(args, id2label, label2id, num_labels, nclasses, inference_mode)
+		
 	else:
 		raise ValueError(f"Data modality {args.data_modality} not supported!")
 
