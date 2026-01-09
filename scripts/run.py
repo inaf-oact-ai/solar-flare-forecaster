@@ -1290,12 +1290,15 @@ def print_model(model, args, only_frozen=True, only_trainable=False, max_lines=1
 	# -------------------------
 	total = 0
 	frozen = 0
+	trainable = 0
 	for _, p in model.named_parameters():
 		total += p.numel()
-		if not p.requires_grad:
+		if p.requires_grad:
+			trainable += p.numel()
+		else:
 			frozen += p.numel()
 
-	logger.info(f"[print_model] params: frozen={frozen} / total={total} ({(100.0*frozen/max(1,total)):.2f}%)")
+	logger.info(f"[print_model] params: trainable={trainable} / total={total} ({(100.0*trainable/max(1,total)):.2f}%), frozen={frozen} / total={total} ({(100.0*frozen/max(1,total)):.2f}%)")
 
 def print_all_model_params(model):
 	""" Print all model parameters """
