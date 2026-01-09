@@ -1157,7 +1157,7 @@ def print_model(model, args, only_frozen=True, only_trainable=False, max_lines=1
 			if only_trainable and not p.requires_grad:
 				continue
 
-			logger.info(f"{prefix}{name}\trequires_grad={p.requires_grad}\tshape={tuple(p.shape)}")
+			logger.info(f"--> {prefix}{name}\trequires_grad={p.requires_grad}\tshape={tuple(p.shape)}")
 			n += 1
 
 			if max_lines is not None and n >= max_lines:
