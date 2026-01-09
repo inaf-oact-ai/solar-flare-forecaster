@@ -909,10 +909,10 @@ class TSDataset(BaseDataset):
 	def compute_ts_var_stats(self):
 		""" Compute ts var dataset stats """	
 		
-		print("len(self.data_vars)")
-		print(len(self.data_vars))
-		print("len(self.logstretch_vars)")
-		print(len(self.logstretch_vars))
+		#print("len(self.data_vars)")
+		#print(len(self.data_vars))
+		#print("len(self.logstretch_vars)")
+		#print(len(self.logstretch_vars))
 		
 		for k, data_var in enumerate(self.data_vars):
 			data_all= []
