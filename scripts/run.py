@@ -1757,6 +1757,7 @@ def load_training_opts(args):
 		fp16=args.fp16,
 		bf16=args.bf16,
 		weight_decay=args.weight_decay,
+		remove_unused_columns=False if args.data_modality=="multimodal" else True,
 	)
 	
 	print("--> training options")
