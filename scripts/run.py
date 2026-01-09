@@ -1010,6 +1010,9 @@ def freeze_model_old(model, args):
 def freeze_model(model, args):
 	""" Freeze certain part of the model """
 
+	# -----------------------------------
+	# HELPERS
+	# -----------------------------------
 	def freeze_named_layers(module, encoder_name, layer_search_pattern, max_freeze_layer_id):
 		if module is None:
 			return
@@ -1018,7 +1021,31 @@ def freeze_model(model, args):
 				layer_index = extract_layer_id(name, layer_search_pattern)
 				if max_freeze_layer_id == -1 or (layer_index != -1 and layer_index < max_freeze_layer_id):
 					logger.debug(f"Freezing layer {name} ...")
-					param.requires_grad = False	
+					param.requires_grad = False
+					
+	def freeze_all_params(module):
+		if module is None:
+			return
+		for _, p in module.named_parameters():
+			p.requires_grad = False
+
+	def unfreeze_encoder_layers_by_id(module, encoder_name, layer_search_pattern, max_unfreeze_from_layer_id):
+		"""
+		Unfreezes encoder layers whose index >= max_unfreeze_from_layer_id.
+		Example: if max_unfreeze_from_layer_id=8, unfreeze layers 8..end.
+		Use -1 to keep everything frozen.
+		"""
+		if module is None:
+			return
+		if max_unfreeze_from_layer_id < 0:
+			return
+
+		for name, p in module.named_parameters():
+			if not name.startswith(encoder_name):
+				continue
+			layer_index = extract_layer_id(name, layer_search_pattern)
+			if layer_index != -1 and layer_index >= max_unfreeze_from_layer_id:
+				p.requires_grad = True
 
 	# -----------------------------
 	# IMAGE
@@ -1103,34 +1130,75 @@ def freeze_model(model, args):
 	# -----------------------------
 	if args.data_modality == "multimodal":
 		# Freeze VIDEO branch
+		video_parent = getattr(model, "video_model", None)
+		video_base = getattr(video_parent, "base_model", None) if video_parent is not None else None
+		if video_base is None and video_parent is not None:
+			video_base = getattr(video_parent, "videomae", None)
+		if video_base is None:
+			video_base = video_parent
+	
 		if args.freeze_backbone:
-			logger.info("Freezing Video encoder ...")	
-			video_parent = getattr(model, "video_model", None)
-			video_base = getattr(video_parent, "base_model", None) if video_parent is not None else None
-			if video_base is None and video_parent is not None:
-				video_base = getattr(video_parent, "videomae", None)
-			if video_base is None:
-				video_base = video_parent
-			freeze_named_layers(
-				video_base,
-				encoder_name="encoder",
-				layer_search_pattern="layer",
-				max_freeze_layer_id=args.max_freeze_layer_id
-			)
+			logger.info("Freezing entire Video backbone ...")
+			freeze_all_params(video_base)
+
+			# Optional partial unfreeze: interpret args.max_freeze_layer_id as "freeze up to"
+			# Here: keep layers < max_freeze_layer_id frozen, unfreeze >= max_freeze_layer_id
+			if args.max_freeze_layer_id >= 0:
+				logger.info(f"Unfreezing Video encoder layers >= {args.max_freeze_layer_id} ...")
+				unfreeze_encoder_layers_by_id(
+					video_base,
+					encoder_name="encoder",
+					layer_search_pattern="layer",
+					max_unfreeze_from_layer_id=args.max_freeze_layer_id
+				)
+		
+		#if args.freeze_backbone:
+		#	logger.info("Freezing Video encoder ...")	
+		#	video_parent = getattr(model, "video_model", None)
+		#	video_base = getattr(video_parent, "base_model", None) if video_parent is not None else None
+		#	if video_base is None and video_parent is not None:
+		#		video_base = getattr(video_parent, "videomae", None)
+		#	if video_base is None:
+		#		video_base = video_parent
+		#	freeze_named_layers(
+		#		video_base,
+		#		encoder_name="encoder",
+		#		layer_search_pattern="layer",
+		#		max_freeze_layer_id=args.max_freeze_layer_id
+		#	)
 
 		# Freeze TS branch
+		ts_base = getattr(model, "ts_backbone", None)
+		if ts_base is None:
+			ts_model = getattr(model, "ts_model", None)
+			ts_base = getattr(ts_model, "backbone", None) if ts_model is not None else None
+
 		if args.ts_freeze_backbone:
-			logger.info("Freezing TS encoder ...")	
-			ts_base = getattr(model, "ts_backbone", None)
-			if ts_base is None:
-				ts_model = getattr(model, "ts_model", None)
-				ts_base = getattr(ts_model, "backbone", None) if ts_model is not None else None
-			freeze_named_layers(
-				ts_base,
-				encoder_name="encoder",
-				layer_search_pattern="layers",
-				max_freeze_layer_id=args.ts_max_freeze_layer_id
-			)
+			logger.info("Freezing entire TS backbone ...")
+			freeze_all_params(ts_base)
+
+			if args.ts_max_freeze_layer_id >= 0:
+				logger.info(f"Unfreezing TS encoder layers >= {args.ts_max_freeze_layer_id} ...")
+				unfreeze_encoder_layers_by_id(
+					ts_base,
+					encoder_name="encoder",
+					layer_search_pattern="layers",
+					max_unfreeze_from_layer_id=args.ts_max_freeze_layer_id
+				)
+			
+		#if args.ts_freeze_backbone:
+		#	logger.info("Freezing TS encoder ...")	
+		#	ts_base = getattr(model, "ts_backbone", None)
+		#	if ts_base is None:
+		#		ts_model = getattr(model, "ts_model", None)
+		#		ts_base = getattr(ts_model, "backbone", None) if ts_model is not None else None
+		#	freeze_named_layers(
+		#		ts_base,
+		#		encoder_name="encoder",
+		#		layer_search_pattern="layers",
+		#		max_freeze_layer_id=args.ts_max_freeze_layer_id
+		#	)
+		
 		return model
 
 	return model
