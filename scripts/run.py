@@ -1017,7 +1017,7 @@ def freeze_model(model, args):
 			if name.startswith(encoder_name):
 				layer_index = extract_layer_id(name, layer_search_pattern)
 				if max_freeze_layer_id == -1 or (layer_index != -1 and layer_index < max_freeze_layer_id):
-					logger.info(f"Freezing layer {name} ...")
+					logger.debug(f"Freezing layer {name} ...")
 					param.requires_grad = False	
 
 	# -----------------------------
@@ -1157,11 +1157,11 @@ def print_model(model, args, only_frozen=True, only_trainable=False, max_lines=1
 			if only_trainable and not p.requires_grad:
 				continue
 
-			print(f"{prefix}{name}\trequires_grad={p.requires_grad}\tshape={tuple(p.shape)}")
+			logger.info(f"{prefix}{name}\trequires_grad={p.requires_grad}\tshape={tuple(p.shape)}")
 			n += 1
 
 			if max_lines is not None and n >= max_lines:
-				print(f"{prefix}... (truncated at {max_lines} lines)")
+				logger.info(f"{prefix}... (truncated at {max_lines} lines)")
 				break
 		return n
 
