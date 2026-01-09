@@ -1258,10 +1258,10 @@ def print_model(model, args, only_frozen=True, only_trainable=False, max_lines=1
 		if only_trainable and not p.requires_grad:
 			continue
 
-		print(f"head.{name}\trequires_grad={p.requires_grad}\tshape={tuple(p.shape)}")
+		logger.info(f"--> head.{name}\trequires_grad={p.requires_grad}\tshape={tuple(p.shape)}")
 		n += 1
 		if max_lines is not None and n >= max_lines:
-			print("head.... (truncated)")
+			logger.info("head.... (truncated)")
 			break
 
 	# -------------------------
@@ -1279,10 +1279,10 @@ def print_model(model, args, only_frozen=True, only_trainable=False, max_lines=1
 			if only_trainable and not p.requires_grad:
 				continue
 					
-			print(f"fusion.{name}\trequires_grad={p.requires_grad}\tshape={tuple(p.shape)}")
+			logger.info(f"--> fusion.{name}\trequires_grad={p.requires_grad}\tshape={tuple(p.shape)}")
 			n += 1
 			if max_lines is not None and n >= max_lines:
-				print("fusion.... (truncated)")
+				logger.info("fusion.... (truncated)")
 				break
 
 	# -------------------------
