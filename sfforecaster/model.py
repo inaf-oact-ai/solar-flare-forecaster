@@ -1143,6 +1143,15 @@ class MultimodalConcatMLP(torch.nn.Module):
 		#if freeze_ts_backbone:
 		#	self._freeze_moirai(max_freeze_ts_layer_id)
 		#####################################
+		
+		# - Disable unimodal classifier heads (not used in multimodal forward)
+		if hasattr(self.video_model, "classifier") and isinstance(self.video_model.classifier, torch.nn.Module):
+			for p in self.video_model.classifier.parameters():
+				p.requires_grad = False
+
+		if hasattr(self.ts_model, "classifier") and isinstance(self.ts_model.classifier, torch.nn.Module):
+			for p in self.ts_model.classifier.parameters():
+				p.requires_grad = False
 
 	@property
 	def ts_backbone(self):
