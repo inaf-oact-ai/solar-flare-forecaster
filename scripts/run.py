@@ -12,14 +12,15 @@ import random
 import numpy as np
 import argparse
 from pathlib import Path
+import json
+import csv
 
 # - SKLEARN
 from sklearn import metrics
-from sklearn.metrics import f1_score, roc_auc_score, accuracy_score, recall_score, precision_score
+from sklearn.metrics import f1_score, roc_auc_score, recall_score, precision_score
 from sklearn.metrics import accuracy_score, hamming_loss
 from sklearn.metrics import classification_report
 from sklearn.metrics import confusion_matrix, multilabel_confusion_matrix
-from sklearn.metrics import hamming_loss
 
 # - TORCH
 import torch
@@ -220,6 +221,9 @@ def get_args():
 	parser.set_defaults(compute_metrics_vs_thr=False)
 	
 	parser.add_argument('-seed', '--seed', dest='seed', required=False, type=int, default=42, action='store',help='Random seed that will be set at the beginning of training (default=42)')
+	
+	parser.add_argument('--print_all_model_layers', dest='print_all_model_layers', action='store_true', help='Print all model layers for debug (default=false)')	
+	parser.set_defaults(print_all_model_layers=False)
 	
 	# - Imbalanced trainer options
 	parser.add_argument("--use_weighted_loss", dest='use_weighted_loss', action="store_true", default=False, help="Use class-weighted loss (CE or focal alpha).")
@@ -778,9 +782,8 @@ def load_ts_model(
 	if inference_mode:
 	  # - Load trained checkpoint (weights + config)
 		ckpt = ckpt_override if ckpt_override else args.model # can be a file OR a checkpoint dir
-		state = load_state_dict_any(ckpt)
 		
-		logger.info(f"Loading weights from path {args.model} ...")
+		logger.info(f"Loading weights from path {ckpt} ...")
 		state = load_state_dict_any(ckpt)
 		
 		# - If checkpoint expects Sequential(Dropout, Linear) but we currently have Linear, fix head first
@@ -825,7 +828,7 @@ def load_multimodal_model(
 	# -----------------------
 	if mm_init == "pretrained":
 		# Use pretrained weights only (no branch ckpts)
-		video_model, _vp = load_video_model(
+		video_model, image_processor = load_video_model(
 			args=args,
 			id2label=id2label,
 			label2id=label2id,
@@ -847,7 +850,7 @@ def load_multimodal_model(
 	elif mm_init == "unimodal":
 		# Init from separately trained unimodal ckpts (if provided), otherwise pretrained
 		video_inference_mode= (True if video_ckpt else False)
-		video_model, _vp = load_video_model(
+		video_model, image_processor = load_video_model(
 			args=args,
 			id2label=id2label,
 			label2id=label2id,
@@ -875,7 +878,7 @@ def load_multimodal_model(
 	elif mm_init == "multimodal":
 		# For multimodal ckpt init we still need a *skeleton* model.
 		# Build branches from pretrained or from branch ckpts if provided.
-		video_model, _vp = load_video_model(
+		video_model, image_processor = load_video_model(
 			args=args,
 			id2label=id2label,
 			label2id=label2id,
@@ -931,8 +934,8 @@ def load_multimodal_model(
 		model.eval() if inference_mode else None
 
 	# Processor: for multimodal we need the VIDEO processor
-	image_processor = AutoImageProcessor.from_pretrained(args.model) if args.use_model_processor else None
-
+	# NB: Use the image_processor returned by load_video_model() rather than allocating a new one with: image_processor = AutoImageProcessor.from_pretrained(args.model)
+	
 	return model, image_processor
 	
 			
@@ -966,7 +969,7 @@ def load_model(
 		raise ValueError(f"Data modality {args.data_modality} not supported!")
 
 
-def freeze_model(model, args):
+def freeze_model_old(model, args):
 	""" Freeze certain part of the model """
 	
 	# - Set encoder model name
@@ -1003,6 +1006,251 @@ def freeze_model(model, args):
 		
 	return model
 
+
+def freeze_model(model, args):
+	""" Freeze certain part of the model """
+
+	def freeze_named_layers(module, encoder_name, layer_search_pattern, max_freeze_layer_id):
+		if module is None:
+			return
+		for name, param in module.named_parameters():
+			if name.startswith(encoder_name):
+				layer_index = extract_layer_id(name, layer_search_pattern)
+				if max_freeze_layer_id == -1 or (layer_index != -1 and layer_index < max_freeze_layer_id):
+					logger.info(f"Freezing layer {name} ...")
+					param.requires_grad = False	
+
+	# -----------------------------
+	# IMAGE
+	# -----------------------------
+	if args.data_modality == "image":
+		if args.freeze_backbone:
+			logger.info("Freezing Image encoder ...")
+			model_base = getattr(model, "base_model", None)
+			freeze_named_layers(
+				model_base,
+				encoder_name="vision_model.encoder",
+				layer_search_pattern="layers",
+				max_freeze_layer_id=args.max_freeze_layer_id
+			)
+		return model
+		
+	# -----------------------------
+	# VIDEO
+	# -----------------------------
+	if args.data_modality == "video":
+		if args.video_model == "imgfeatts":
+			# Freeze IMAGE branch of ImageFeatTSClassifier
+			if args.freeze_backbone:
+				logger.info("Freezing imgfeatts IMAGE encoder ...")
+				img_base = None
+				img_parent = getattr(model, "image_enc", None)
+				if img_parent is not None:
+					img_base = getattr(img_parent, "encoder", None)
+				freeze_named_layers(
+					img_base,
+					encoder_name="encoder",
+					layer_search_pattern="layers",
+					max_freeze_layer_id=args.max_freeze_layer_id
+				)
+
+			# Freeze TS(Moirai) branch of ImageFeatTSClassifier
+			if args.ts_freeze_backbone:
+				logger.info("Freezing imgfeatts TS encoder ...")
+				ts_base = getattr(model, "backbone", None)
+				freeze_named_layers(
+					ts_base,
+					encoder_name="encoder",
+					layer_search_pattern="layers",
+					max_freeze_layer_id=args.ts_max_freeze_layer_id
+				)
+
+			return model
+			
+		elif args.video_model == "videomae":
+			if args.freeze_backbone:
+				logger.info("Freezing Video encoder ...")	
+				model_base = getattr(model, "base_model", None)
+				freeze_named_layers(
+					model_base,
+					encoder_name="encoder",
+					layer_search_pattern="layer",
+					max_freeze_layer_id=args.max_freeze_layer_id
+				)
+			return model
+			
+		else:
+			logger.warning(f"Video model {args.video_model} not recognized, returning same model ...")	
+			return model
+		
+	# -----------------------------
+	# TS
+	# -----------------------------
+	if args.data_modality == "ts":
+		if args.ts_freeze_backbone:
+			logger.info("Freezing TS encoder ...")	
+			ts_base = getattr(model, "backbone", None)
+			freeze_named_layers(
+				ts_base,
+				encoder_name="encoder",
+				layer_search_pattern="layers",
+				max_freeze_layer_id=args.ts_max_freeze_layer_id
+			)
+		return model
+		
+	# -----------------------------
+	# MULTIMODAL
+	# -----------------------------
+	if args.data_modality == "multimodal":
+		# Freeze VIDEO branch
+		if args.freeze_backbone:
+			logger.info("Freezing Video encoder ...")	
+			video_parent = getattr(model, "video_model", None)
+			video_base = getattr(video_parent, "base_model", None) if video_parent is not None else None
+			if video_base is None and video_parent is not None:
+				video_base = getattr(video_parent, "videomae", None)
+			if video_base is None:
+				video_base = video_parent
+			freeze_named_layers(
+				video_base,
+				encoder_name="encoder",
+				layer_search_pattern="layer",
+				max_freeze_layer_id=args.max_freeze_layer_id
+			)
+
+		# Freeze TS branch
+		if args.ts_freeze_backbone:
+			logger.info("Freezing TS encoder ...")	
+			ts_base = getattr(model, "ts_backbone", None)
+			if ts_base is None:
+				ts_model = getattr(model, "ts_model", None)
+				ts_base = getattr(ts_model, "backbone", None) if ts_model is not None else None
+			freeze_named_layers(
+				ts_base,
+				encoder_name="encoder",
+				layer_search_pattern="layers",
+				max_freeze_layer_id=args.ts_max_freeze_layer_id
+			)
+		return model
+
+	return model
+
+
+def print_model(model, args, only_frozen=True, max_lines=1000):
+	"""
+	Print model parameters and whether they are frozen.
+	Works for: image, video, ts, multimodal (and video_model=imgfeatts).
+	"""
+
+	def _print_params(module, prefix, only_frozen=True, max_lines=300):
+		if module is None:
+			logger.warning(f"[print_model] {prefix}: module is None")
+			return 0
+
+		n = 0
+		for name, p in module.named_parameters():
+			if only_frozen and p.requires_grad:
+				continue
+			print(f"{prefix}{name}\trequires_grad={p.requires_grad}\tshape={tuple(p.shape)}")
+			n += 1
+			if max_lines is not None and n >= max_lines:
+				print(f"{prefix}... (truncated at {max_lines} lines)")
+				break
+		return n
+
+	def _get_video_backbone(video_model):
+		# HF VideoMAEForVideoClassification usually exposes base_model; fallback to videomae or itself
+		if video_model is None:
+			return None
+		return getattr(video_model, "base_model", getattr(video_model, "videomae", video_model))
+
+	def _get_ts_backbone(ts_model):
+		if ts_model is None:
+			return None
+		return getattr(ts_model, "backbone", ts_model)
+
+	logger.info(f"[print_model] only_frozen={only_frozen}, max_lines={max_lines}")
+
+	# -------------------------
+	# Print modality-specific "backbones"
+	# -------------------------
+	if args.data_modality == "image":
+		logger.info("[print_model] IMAGE: base_model parameters")
+		n = _print_params(getattr(model, "base_model", None), prefix="base.", only_frozen=only_frozen, max_lines=max_lines)
+		if n == 0 and only_frozen:
+			logger.info("[print_model] No frozen parameters found in IMAGE base_model.")
+
+	elif args.data_modality == "video":
+		if args.video_model == "imgfeatts":
+			# ImageFeatTSClassifier: has both image encoder and ts backbone
+			logger.info("[print_model] VIDEO(imgfeatts): image encoder parameters")
+			_print_params(getattr(model, "image_enc", None), prefix="image_enc.", only_frozen=only_frozen, max_lines=max_lines)
+
+			logger.info("[print_model] VIDEO(imgfeatts): ts backbone parameters")
+			_print_params(_get_ts_backbone(getattr(model, "backbone", None)), prefix="ts.", only_frozen=only_frozen, max_lines=max_lines)
+
+		else:
+			logger.info("[print_model] VIDEO(videomae): base_model parameters")
+			n = _print_params(getattr(model, "base_model", None), prefix="base.", only_frozen=only_frozen, max_lines=max_lines)
+			if n == 0 and only_frozen:
+				logger.info("[print_model] No frozen parameters found in VIDEO base_model.")
+
+	elif args.data_modality == "ts":
+		logger.info("[print_model] TS: backbone parameters")
+		n = _print_params(getattr(model, "backbone", None), prefix="ts.", only_frozen=only_frozen, max_lines=max_lines)
+		if n == 0 and only_frozen:
+			logger.info("[print_model] No frozen parameters found in TS backbone.")
+
+	elif args.data_modality == "multimodal":
+		logger.info("[print_model] MULTIMODAL: video backbone parameters")
+		vbase = _get_video_backbone(getattr(model, "video_model", None))
+		_print_params(vbase, prefix="video.", only_frozen=only_frozen, max_lines=max_lines)
+
+		logger.info("[print_model] MULTIMODAL: ts backbone parameters")
+		tbase = getattr(model, "ts_backbone", None)
+		if tbase is None:
+			# fallback if only ts_model is present
+			tbase = _get_ts_backbone(getattr(model, "ts_model", None))
+		_print_params(tbase, prefix="ts.", only_frozen=only_frozen, max_lines=max_lines)
+
+	else:
+		logger.warning(f"[print_model] Unsupported data_modality={args.data_modality}. Printing full model params.")
+		_print_params(model, prefix="", only_frozen=only_frozen, max_lines=max_lines)
+
+	# -------------------------
+	# Optional: print fusion/head params for multimodal
+	# -------------------------
+	if args.data_modality == "multimodal":
+		logger.info("[print_model] MULTIMODAL: fusion head parameters")
+		# Print only params outside the two backbones (proj/head) by filtering prefixes
+		n = 0
+		for name, p in model.named_parameters():
+			if name.startswith("video_model.") or name.startswith("ts_model.") or name.startswith("ts_backbone."):
+				continue
+			if only_frozen and p.requires_grad:
+				continue
+			print(f"fusion.{name}\trequires_grad={p.requires_grad}\tshape={tuple(p.shape)}")
+			n += 1
+			if max_lines is not None and n >= max_lines:
+				print("fusion.... (truncated)")
+				break
+
+	# -------------------------
+	# Summary counts
+	# -------------------------
+	total = 0
+	frozen = 0
+	for _, p in model.named_parameters():
+		total += p.numel()
+		if not p.requires_grad:
+			frozen += p.numel()
+
+	logger.info(f"[print_model] params: frozen={frozen} / total={total} ({(100.0*frozen/max(1,total)):.2f}%)")
+
+def print_all_model_params(model):
+	""" Print all model parameters """
+	for name, param in model.named_parameters():
+		print(name, param.requires_grad)
 
 ########################
 ##   LOAD TRANSFORM   ##
@@ -1152,7 +1400,7 @@ def load_dataset(
 	#==   SET OPTIONS
 	#====================================
 	ts_vars= [str(x.strip()) for x in args.ts_vars.split(',')]
-	ts_logstretchs= [bool(x.strip()) for x in args.ts_logstretchs.split(',')]
+	ts_logstretchs= [bool(int(x.strip())) for x in args.ts_logstretchs.split(',')]
 	
 	#====================================
 	#==   CREATE DATA TRANSFORMS
@@ -1246,7 +1494,7 @@ def load_dataset(
 			data_vars=tuple(args.ts_vars.split(",")) if isinstance(args.ts_vars, str) else tuple(args.ts_vars),
 			logstretch_vars=tuple([bool(int(x)) for x in args.ts_logstretchs.split(",")]) if isinstance(args.ts_logstretchs, str) else tuple(args.ts_logstretchs),
 			npoints=int(args.ts_npoints),
-			nclasses=args.nclasses,
+			nclasses=nclasses,
 			id2target=id2target,
 			multiout=args.multiout,
 			multilabel=args.multilabel,
@@ -1301,7 +1549,7 @@ def load_dataset(
 				data_vars=tuple(args.ts_vars.split(",")) if isinstance(args.ts_vars, str) else tuple(args.ts_vars),
 				logstretch_vars=tuple([bool(int(x)) for x in args.ts_logstretchs.split(",")]) if isinstance(args.ts_logstretchs, str) else tuple(args.ts_logstretchs),
 				npoints=int(args.ts_npoints),
-				nclasses=args.nclasses,
+				nclasses=nclasses,
 				id2target=id2target,
 				multiout=args.multiout,
 				multilabel=args.multilabel,
@@ -1378,9 +1626,9 @@ def load_training_opts(args):
 		logging_nan_inf_filter=False,
 		#disable_tqdm=True,
 		run_name=args.runname,
-    #report_to="wandb",  # enable logging to W&B
-    report_to=args.report_to,
-    seed=args.seed,
+		#report_to="wandb",  # enable logging to W&B
+		report_to=args.report_to,
+		seed=args.seed,
 		dataloader_num_workers=args.num_workers,
 		dataloader_pin_memory=(args.pin_memory=="true"),
 		dataloader_persistent_workers=(args.persistent_workers=="true" and args.num_workers>0),
@@ -1583,26 +1831,27 @@ def run_predict(
 						
 		###input_tensor= input_tensor.unsqueeze(0).to(device)
 		#input_tensor= input_tensor.to(device)
- 	
+
 		if args.data_modality in ["ts", "multimodal"]:
 			input_batch = {k: (v.to(device) if torch.is_tensor(v) else v) for k, v in input_batch.items()}
 		else:
 			input_tensor = input_tensor.to(device)
  
- 		# - Compute model outputs
+		# - Compute model outputs
 		with torch.no_grad():
 			if args.data_modality in ["ts", "multimodal"]:
 				outputs = model(**input_batch)
 			else:
 				outputs = model(input_tensor)
-	
+
 			logits = outputs.logits
 				
-  	# - Compute predicted labels & probs
+		# - Compute predicted labels & probs
 		if args.multilabel:
 			sigmoid = torch.nn.Sigmoid()
 			probs = sigmoid(logits.squeeze().cpu()).numpy()
 			predictions = np.zeros(probs.shape)
+			sigmoid_thr = getattr(args, "binary_thr", 0.5)
 			predictions[np.where(probs >= sigmoid_thr)] = 1 # turn predicted id's into actual label names	
 			predicted_labels = [id2label[idx] for idx, label in enumerate(predictions) if label == 1.0]
 			predicted_probs = [float(probs[idx]) for idx, label in enumerate(predictions) if label == 1.0]
@@ -1637,7 +1886,7 @@ def run_predict(
 			# class_id_ord = coral_decode_with_thresholds(logits, thresholds=thresholds)
 			# predicted_label = id2label[class_id_ord]
 			# predicted_prob  = float(probs_np[class_id_ord])  # still report the class prob
-	
+
 			# - Fill prediction results in summary dict
 			image_info["label_pred"] = str(predicted_label)
 			image_info["prob_pred"]  = float(predicted_prob)
@@ -1645,12 +1894,12 @@ def run_predict(
 			# - Add extra info
 			image_info["probs_all"]  = probs_np.tolist()                  # K-class probabilities
 			image_info["ge_scores"]  = torch.sigmoid(logits.squeeze()).cpu().tolist()  # [>=C, >=M, >=X]
-		
+
 		else:
-		
+
 			lt = logits.detach().squeeze().cpu()
 			binary_thr = getattr(args, "binary_thr", 0.5)
-		
+
 			if lt.ndim == 0 or lt.shape[-1] == 1:
 				# SINGLE-LOGIT BINARY: logits shape (1,) or scalar
 				p_pos = torch.sigmoid(lt).item()
@@ -1659,7 +1908,7 @@ def run_predict(
 				class_id = 1 if p_pos >= binary_thr else 0
 				probs = np.array([p_neg, p_pos], dtype=np.float32)
 				predicted_prob = float(p_pos if class_id == 1 else p_neg)
-			
+
 			else:
 				# MULTICLASS or 2-LOGIT BINARY HEAD
 				probs = torch.softmax(lt, dim=-1).numpy()
@@ -1671,13 +1920,13 @@ def run_predict(
 				#class_id= np.argmax(probs)
 				#predicted_label = id2label[class_id]
 				#predicted_prob= probs[class_id]
-				
+
 			predicted_label = id2label[class_id]
-				
+
 			# - Fill prediction results in summary dict
 			image_info["label_pred"]= str(predicted_label)
 			image_info["prob_pred"]= float(predicted_prob)
-					
+
 			if args.verbose:
 				print("== Image: %s ==" % (sname))
 				print("logits.squeeze().cpu()")
@@ -1864,23 +2113,33 @@ def main():
 	print(model)
 	print("")
 	
-	# - Freeze backbone?
-	if args.freeze_backbone:
-		logger.info("Freezing model base layers ...")
-		model= freeze_model(model, args)
+	# - Freeze backbone (if enabled)
+	logger.info("Applying model freeze (if enabled) ...")
+	model= freeze_model(model, args)
+	#if args.freeze_backbone:
+	#	logger.info("Freezing model base layers ...")
+	#	model= freeze_model(model, args)
 		
-		try:
-			logger.info("Print base model info ...")	
-			for name, param in model.base_model.named_parameters():
-				print(name, param.requires_grad)	
-		except Exception as e:
-			logger.warning(f"Cannot print model base parameters (err={str(e)}, trying alternative method ...")	
-			for name, param in model.backbone.named_parameters():
-				print(name, param.requires_grad)	
-				
+	# - Print model layers
+	logger.info("Printing frozen model layers ...")
+	print_model(model, args, only_frozen=True, max_lines=1000)
+		
+	if args.print_all_model_layers:	
 		logger.info("Print entire model info ...")
-		for name, param in model.named_parameters():
-			print(name, param.requires_grad)	
+		print_all_model_params(model)
+		
+	#	try:
+	#		logger.info("Print base model info ...")	
+	#		for name, param in model.base_model.named_parameters():
+	#			print(name, param.requires_grad)	
+	#	except Exception as e:
+	#		logger.warning(f"Cannot print model base parameters (err={str(e)}, trying alternative method ...")	
+	#		for name, param in model.backbone.named_parameters():
+	#			print(name, param.requires_grad)	
+				
+	#	logger.info("Print entire model info ...")
+	#	for name, param in model.named_parameters():
+	#		print(name, param.requires_grad)	
 	
 	##################################
 	##     DATASET
