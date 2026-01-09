@@ -200,22 +200,20 @@ class MoiraiForSequenceClassification(torch.nn.Module):
 		
 		d_model = getattr(self.backbone, "d_model", 384)
 		self.config = MoiraiTSConfig(num_labels=num_labels, d_model=d_model)
-		#print("self.config.num_labels")
-		#print(self.config.num_labels)
+		
+		## == COMMENTING IT (DONE NOW IN run.py) ##
+		#if freeze_backbone:
+		#	logger.info("Freezing Moirai encoder ...")	
+		#	encoder_name= "encoder"
+		#	layer_search_pattern= "layers"
 
-		if freeze_backbone:
-			#for p in self.backbone.parameters():
-			#	p.requires_grad = False
-			logger.info("Freezing Moirai encoder ...")	
-			encoder_name= "encoder"
-			layer_search_pattern= "layers"
-
-			for name, param in self.backbone.named_parameters():
-				if name.startswith(encoder_name):
-					layer_index= extract_layer_id(name, layer_search_pattern)
-					if self.max_freeze_layer_id==-1 or (self.max_freeze_layer_id>=0 and layer_index!=-1 and layer_index<self.max_freeze_layer_id):
-						print(f"Freezing Moirai layer {name} ...")
-						param.requires_grad = False	
+		#	for name, param in self.backbone.named_parameters():
+		#		if name.startswith(encoder_name):
+		#			layer_index= extract_layer_id(name, layer_search_pattern)
+		#			if self.max_freeze_layer_id==-1 or (self.max_freeze_layer_id>=0 and layer_index!=-1 and layer_index<self.max_freeze_layer_id):
+		#				print(f"Freezing Moirai layer {name} ...")
+		#				param.requires_grad = False
+		############################################
 
 		# - Try to make the backbone emit representations
 		for attr in ("return_repr", "output_hidden_states", "return_hidden"):
@@ -437,7 +435,7 @@ class MoiraiForSequenceClassification(torch.nn.Module):
 		elif reprs.dim() == 3:
 			B, L, D = reprs.shape
 		else:
- 			raise RuntimeError(f"Unexpected reprs shape: {tuple(reprs.shape)}")
+			raise RuntimeError(f"Unexpected reprs shape: {tuple(reprs.shape)}")
 
 		#print("reprs.dim()")
 		#print(reprs.dim())
@@ -774,8 +772,10 @@ class ImageFeatTSClassifier(torch.nn.Module):
 		else:
 			logger.warning("Scaler patch: no 'scaler' attribute or no forward(); could not patch.")
 		
+		## COMMENT THIS AS DONE IN run.py ###
 		# - Freeze encoders?
-		self._freeze_encoders()
+		#self._freeze_encoders()
+		####################################
 
 		# (optional) coax repr outputs
 		for attr in ("return_repr", "output_hidden_states", "return_hidden"):
@@ -1135,12 +1135,14 @@ class MultimodalConcatMLP(torch.nn.Module):
 			torch.nn.Linear(hidden_dim, num_labels),
 		)
 
+		### COMMENTED AS NOW DONE IN run.py #############
 		# --- Freezing backbone?
-		if freeze_video_backbone:
-			self._freeze_videomae(max_freeze_video_layer_id)
+		#if freeze_video_backbone:
+		#	self._freeze_videomae(max_freeze_video_layer_id)
 
-		if freeze_ts_backbone:
-			self._freeze_moirai(max_freeze_ts_layer_id)
+		#if freeze_ts_backbone:
+		#	self._freeze_moirai(max_freeze_ts_layer_id)
+		#####################################
 
 	def _freeze_videomae(self, max_freeze_layer_id: int):
 		""" Freeze video MAE backbone """
