@@ -1136,13 +1136,16 @@ def freeze_model(model, args):
 	return model
 
 
-def print_model(model, args, only_frozen=True, max_lines=1000):
+def print_model(model, args, only_frozen=True, only_trainable=False, max_lines=1000):
 	"""
 	Print model parameters and whether they are frozen.
 	Works for: image, video, ts, multimodal (and video_model=imgfeatts).
 	"""
 
-	def _print_params(module, prefix, only_frozen=True, max_lines=300):
+	if only_frozen and only_trainable:
+		raise ValueError("print_model: choose only one of only_frozen or only_trainable")
+
+	def _print_params(module, prefix, only_frozen=True, only_trainable=False, max_lines=1000):
 		if module is None:
 			logger.warning(f"[print_model] {prefix}: module is None")
 			return 0
@@ -1151,8 +1154,12 @@ def print_model(model, args, only_frozen=True, max_lines=1000):
 		for name, p in module.named_parameters():
 			if only_frozen and p.requires_grad:
 				continue
+			if only_trainable and not p.requires_grad:
+				continue
+
 			print(f"{prefix}{name}\trequires_grad={p.requires_grad}\tshape={tuple(p.shape)}")
 			n += 1
+
 			if max_lines is not None and n >= max_lines:
 				print(f"{prefix}... (truncated at {max_lines} lines)")
 				break
@@ -1176,7 +1183,7 @@ def print_model(model, args, only_frozen=True, max_lines=1000):
 	# -------------------------
 	if args.data_modality == "image":
 		logger.info("[print_model] IMAGE: base_model parameters")
-		n = _print_params(getattr(model, "base_model", None), prefix="base.", only_frozen=only_frozen, max_lines=max_lines)
+		n = _print_params(getattr(model, "base_model", None), prefix="base.", only_frozen=only_frozen, only_trainable=only_trainable, max_lines=max_lines)
 		if n == 0 and only_frozen:
 			logger.info("[print_model] No frozen parameters found in IMAGE base_model.")
 
@@ -1184,38 +1191,78 @@ def print_model(model, args, only_frozen=True, max_lines=1000):
 		if args.video_model == "imgfeatts":
 			# ImageFeatTSClassifier: has both image encoder and ts backbone
 			logger.info("[print_model] VIDEO(imgfeatts): image encoder parameters")
-			_print_params(getattr(model, "image_enc", None), prefix="image_enc.", only_frozen=only_frozen, max_lines=max_lines)
+			_print_params(getattr(model, "image_enc", None), prefix="image_enc.", only_frozen=only_frozen, only_trainable=only_trainable, max_lines=max_lines)
 
 			logger.info("[print_model] VIDEO(imgfeatts): ts backbone parameters")
-			_print_params(_get_ts_backbone(getattr(model, "backbone", None)), prefix="ts.", only_frozen=only_frozen, max_lines=max_lines)
+			_print_params(_get_ts_backbone(getattr(model, "backbone", None)), prefix="ts.", only_frozen=only_frozen, only_trainable=only_trainable, max_lines=max_lines)
 
 		else:
 			logger.info("[print_model] VIDEO(videomae): base_model parameters")
-			n = _print_params(getattr(model, "base_model", None), prefix="base.", only_frozen=only_frozen, max_lines=max_lines)
+			n = _print_params(getattr(model, "base_model", None), prefix="base.", only_frozen=only_frozen, only_trainable=only_trainable, max_lines=max_lines)
 			if n == 0 and only_frozen:
 				logger.info("[print_model] No frozen parameters found in VIDEO base_model.")
 
 	elif args.data_modality == "ts":
 		logger.info("[print_model] TS: backbone parameters")
-		n = _print_params(getattr(model, "backbone", None), prefix="ts.", only_frozen=only_frozen, max_lines=max_lines)
+		n = _print_params(getattr(model, "backbone", None), prefix="ts.", only_frozen=only_frozen, only_trainable=only_trainable, max_lines=max_lines)
 		if n == 0 and only_frozen:
 			logger.info("[print_model] No frozen parameters found in TS backbone.")
 
 	elif args.data_modality == "multimodal":
 		logger.info("[print_model] MULTIMODAL: video backbone parameters")
 		vbase = _get_video_backbone(getattr(model, "video_model", None))
-		_print_params(vbase, prefix="video.", only_frozen=only_frozen, max_lines=max_lines)
+		_print_params(vbase, prefix="video.", only_frozen=only_frozen, only_trainable=only_trainable, max_lines=max_lines)
 
 		logger.info("[print_model] MULTIMODAL: ts backbone parameters")
 		tbase = getattr(model, "ts_backbone", None)
 		if tbase is None:
 			# fallback if only ts_model is present
 			tbase = _get_ts_backbone(getattr(model, "ts_model", None))
-		_print_params(tbase, prefix="ts.", only_frozen=only_frozen, max_lines=max_lines)
+		_print_params(tbase, prefix="ts.", only_frozen=only_frozen, only_trainable=only_trainable, max_lines=max_lines)
 
 	else:
 		logger.warning(f"[print_model] Unsupported data_modality={args.data_modality}. Printing full model params.")
-		_print_params(model, prefix="", only_frozen=only_frozen, max_lines=max_lines)
+		_print_params(model, prefix="", only_frozen=only_frozen, only_trainable=only_trainable, max_lines=max_lines)
+
+	# -----------------------------------------
+	#  Print modality-specific NON backbone
+	# -----------------------------------------
+	logger.info("[print_model] NON-BACKBONE params (heads/proj/etc.)")
+	n = 0
+	for name, p in model.named_parameters():
+
+		# Skip known backbone prefixes depending on modality
+		if args.data_modality == "image":
+			if name.startswith("base_model."):
+				continue
+
+		elif args.data_modality == "video":
+			if args.video_model == "imgfeatts":
+				if name.startswith("image_enc.") or name.startswith("backbone."):
+					continue
+			else:
+				if name.startswith("base_model."):
+					continue
+
+		elif args.data_modality == "ts":
+			if name.startswith("backbone."):
+				continue
+
+		elif args.data_modality == "multimodal":
+			if name.startswith("video_model.") or name.startswith("ts_model.") or name.startswith("ts_backbone."):
+				continue
+
+		# Apply filters
+		if only_frozen and p.requires_grad:
+			continue
+		if only_trainable and not p.requires_grad:
+			continue
+
+		print(f"head.{name}\trequires_grad={p.requires_grad}\tshape={tuple(p.shape)}")
+		n += 1
+		if max_lines is not None and n >= max_lines:
+			print("head.... (truncated)")
+			break
 
 	# -------------------------
 	# Optional: print fusion/head params for multimodal
@@ -1229,6 +1276,9 @@ def print_model(model, args, only_frozen=True, max_lines=1000):
 				continue
 			if only_frozen and p.requires_grad:
 				continue
+			if only_trainable and not p.requires_grad:
+				continue
+					
 			print(f"fusion.{name}\trequires_grad={p.requires_grad}\tshape={tuple(p.shape)}")
 			n += 1
 			if max_lines is not None and n >= max_lines:
@@ -2122,7 +2172,10 @@ def main():
 		
 	# - Print model layers
 	logger.info("Printing frozen model layers ...")
-	print_model(model, args, only_frozen=True, max_lines=1000)
+	print_model(model, args, only_frozen=True, only_trainable=False, max_lines=1000)
+	
+	logger.info("Printing trainable model layers ...")
+	print_model(model, args, only_frozen=False, only_trainable=True, max_lines=1000)
 		
 	if args.print_all_model_layers:	
 		logger.info("Print entire model info ...")
