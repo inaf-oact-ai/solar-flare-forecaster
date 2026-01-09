@@ -1100,7 +1100,7 @@ class MultimodalConcatMLP(torch.nn.Module):
 
 		# --- TS encoder (Moirai backbone)
 		self.ts_model = ts_model
-		self.ts_backbone = getattr(ts_model, "backbone", ts_model)
+		#self.ts_backbone = getattr(ts_model, "backbone", ts_model) ## Do NOT register the same backbone twice. Access backbone via property below.
 		self.freeze_ts_backbone= freeze_ts_backbone
 		self.max_freeze_ts_layer_id= max_freeze_ts_layer_id
 
@@ -1143,6 +1143,11 @@ class MultimodalConcatMLP(torch.nn.Module):
 		#if freeze_ts_backbone:
 		#	self._freeze_moirai(max_freeze_ts_layer_id)
 		#####################################
+
+	@property
+	def ts_backbone(self):
+		"""Return the Moirai backbone without registering a duplicate module."""
+		return getattr(self.ts_model, "backbone", self.ts_model)
 
 	def _freeze_videomae(self, max_freeze_layer_id: int):
 		""" Freeze video MAE backbone """
