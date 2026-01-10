@@ -453,7 +453,7 @@ def load_image_model_auto(
 				# - Replace the head with 1 logit
 				in_features = model.classifier.in_features
 				model.classifier = torch.nn.Linear(in_features, 1)
-				model.config.num_labels = 1  # avoid confusion; we’ll provide our own loss
+				model.config.num_labels = 1  # avoid confusion; we'll provide our own loss
 				model.config.problem_type = None  # don't let HF pick MSE; we handle loss in Trainer	
 					
 			else:
@@ -2308,9 +2308,6 @@ def main():
 			print("--> ts stats (EVAL)")
 			print(dataset_cv.data_var_stats)
 		
-		# - Find patch_size from the backbone once (typical values 16/32/64). If unsure, 32 usually works for Moirai-2.0-R-small.
-		patch_size = getattr(model.backbone, "patch_size", 32)
-
 		# - Retrieve number of time series points
 		ts_var_stats= dataset.data_var_stats
 		ts_vars= list(ts_var_stats.keys())
@@ -2320,37 +2317,36 @@ def main():
 		context_length= n_points[0]
 
 		data_collator = Uni2TSBatchCollator(
-			context_length=context_length,     # 24h window
-			patch_size=patch_size,
+			context_length=context_length
 		)
 	
 	elif args.data_modality=="multimodal":
 	
-		# patch_size from Moirai backbone, fallback to 32
-		#ts_patch_size = getattr(getattr(model, "ts_backbone", None), "patch_size", 32)
-
-		# get TS patch_size from the actual backbone
-		ts_patch_size = None
-		try:
-			ts_patch_size = int(getattr(model.ts_backbone, "patch_size"))
-		except Exception:
-			try:
-				ts_patch_size = int(getattr(getattr(model.ts_backbone, "config", None), "patch_size"))
-			except Exception:
-				ts_patch_size = None
-
-		if ts_patch_size is None:
-			raise RuntimeError("Cannot determine ts_patch_size from model.ts_backbone; cannot build multimodal collator.")
-
-		logger.info(f"Using TS patch_size={ts_patch_size} from ts_backbone.")
-
+		# - Compute ts var stats
+		dataset.compute_ts_var_stats()
+		print("--> ts stats")
+		print(dataset._ts.data_var_stats)
+		
+		if dataset_cv is not None:
+			dataset_cv.compute_ts_var_stats()
+			print("--> ts stats (EVAL)")
+			print(dataset_cv._ts.data_var_stats)
+		
+		# - Retrieve number of time series points
+		ts_var_stats= dataset._ts.data_var_stats
+		ts_vars= list(ts_var_stats.keys())
+		n_points= ts_var_stats[ts_vars[0]]["npoints"]
+		if len(n_points)>1:
+			logger.warning(f"Time series have more than one length: {str(n_points)} ...")
+		context_length= n_points[0]
+		#context_length= int(args.ts_npoints)
+		
 		data_collator = VideoUni2TSMultimodalCollator(
 			image_processor=image_processor if args.use_model_processor else None, 
 			do_resize=image_processor.do_resize if args.use_model_processor else False,                   # set to True only if processor should resize
 			do_normalize=image_processor.do_normalize if args.use_model_processor else False,              # set to True only if processor should normalize
 			do_rescale=image_processor.do_rescale if args.use_model_processor else False,                  # set to True only if processor should rescale
-			context_length=int(args.ts_npoints),
-			patch_size=ts_patch_size,
+			context_length=context_length,
 			drop_none=True,
 		)
 	

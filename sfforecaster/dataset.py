@@ -1208,6 +1208,14 @@ class MultimodalDataset(BaseDataset):
 		# - Optional filtering for matched samples
 		if self.require_matched:
 			self._filter_unmatched_inplace()
+			
+	def compute_ts_var_stats(self):
+		""" Call ts loader function"""
+		self._ts.compute_ts_var_stats()
+		
+	def load_ts_var(self, idx, data_var, logstretch):
+		""" Call ts loader function """
+		self._ts.load_ts_var(idx, data_var, logstretch)
 
 	def _filter_unmatched_inplace(self):
 		"""Drop samples with missing video frames or ts variables."""

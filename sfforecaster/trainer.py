@@ -249,14 +249,13 @@ class Uni2TSBatchCollator:
 		Wraps Uni2TS Collate to produce the tokenized batch for Moirai{1,2}.forward(...)
 		from simple samples: {"input": [T,C], "labels": int}.
 	"""
-	def __init__(self, context_length: int, patch_size: int):
+	def __init__(self, context_length: int):
 		# Collate args: target_field name must match what backbone expects ("target")
 		# max_length ≈ context_length (will be patched/packed inside)
 		self._collate = _Collate(
 			target_field="target",
 			seq_fields=("target", "observed_mask"),
 			max_length=context_length,
-			#patch_size=patch_size,
 			# other defaults are fine for classification (no forecast region)
 		)
 
@@ -285,7 +284,6 @@ class Uni2TSBatchCollator:
 		packed = self._collate(raw_batch)  # numpy arrays
 		packed["labels"] = np.asarray(labels, dtype=np.int64)
 		
-		
 		# target/observed_mask should already be [B, L, P] (or [B, L] for observed_mask in some builds)
 		target = to_np(packed["target"])                 # [B, L, P]
 		obs    = to_np(packed["observed_mask"])          # [B, L, P] (or [B, L] in some commits)
@@ -295,7 +293,6 @@ class Uni2TSBatchCollator:
 		#print("obs.shape")
 		#print(obs.shape)		
 		
-
 		# Ensure required IDs/masks exist; synthesize if missing.
 		
 		# sample_id should be [B, L] in your build — don't flatten it
@@ -377,7 +374,6 @@ class VideoUni2TSMultimodalCollator:
 		do_normalize=True,
 		do_rescale=True,
 		context_length=1440,
-		patch_size=16,
 		drop_none=True,
 	):
 		self.video_collate = VideoDataCollator(
@@ -387,8 +383,7 @@ class VideoUni2TSMultimodalCollator:
 			do_rescale=do_rescale,
 		)
 		self.ts_collate = Uni2TSBatchCollator(
-			context_length=context_length,
-			patch_size=patch_size,
+			context_length=context_length
 		)
 		self.drop_none = drop_none
 
