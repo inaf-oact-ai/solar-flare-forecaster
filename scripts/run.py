@@ -2325,8 +2325,24 @@ def main():
 		)
 	
 	elif args.data_modality=="multimodal":
+	
 		# patch_size from Moirai backbone, fallback to 32
-		patch_size = getattr(getattr(model, "ts_backbone", None), "patch_size", 32)
+		#ts_patch_size = getattr(getattr(model, "ts_backbone", None), "patch_size", 32)
+
+		# get TS patch_size from the actual backbone
+		ts_patch_size = None
+		try:
+			ts_patch_size = int(getattr(model.ts_backbone, "patch_size"))
+		except Exception:
+			try:
+				ts_patch_size = int(getattr(getattr(model.ts_backbone, "config", None), "patch_size"))
+			except Exception:
+				ts_patch_size = None
+
+		if ts_patch_size is None:
+			raise RuntimeError("Cannot determine ts_patch_size from model.ts_backbone; cannot build multimodal collator.")
+
+		logger.info(f"Using TS patch_size={ts_patch_size} from ts_backbone.")
 
 		data_collator = VideoUni2TSMultimodalCollator(
 			image_processor=image_processor if args.use_model_processor else None, 
@@ -2334,7 +2350,7 @@ def main():
 			do_normalize=image_processor.do_normalize if args.use_model_processor else False,              # set to True only if processor should normalize
 			do_rescale=image_processor.do_rescale if args.use_model_processor else False,                  # set to True only if processor should rescale
 			context_length=int(args.ts_npoints),
-			patch_size=int(patch_size),
+			patch_size=ts_patch_size,
 			drop_none=True,
 		)
 	

@@ -467,6 +467,131 @@ class MoiraiForSequenceClassification(torch.nn.Module):
 
 		logits = self.classifier(pooled)  # [B, num_labels]
 		return SequenceClassifierOutput(logits=logits)
+	
+	def encode(self, **batch) -> torch.Tensor:
+		"""
+		Return a pooled representation [B, D] using the SAME patchify + backbone path as forward(),
+		but without applying the classification head.
+		Expected inputs in batch:
+			target: [B, L, C]
+			observed_mask: [B, L, C] or [B, L]
+		Optional:
+			prediction_mask: [B, L] or [B, Ntok] (will be rebuilt anyway)
+		"""
+		x = batch["target"]			# [B, L, C]
+		obs = batch["observed_mask"]	# [B, L, C] or [B, L]
+
+		if x.dim() != 3:
+			raise RuntimeError(f"encode(): expected target with shape [B,L,C], got {tuple(x.shape)}")
+
+		B, L, C = x.shape
+		device = x.device
+		dtype = x.dtype
+
+		# If observed_mask comes as [B,L], expand to [B,L,C]
+		if obs.dim() == 2:
+			obs = obs.unsqueeze(-1).expand(B, L, C)
+		elif obs.dim() != 3:
+			raise RuntimeError(f"encode(): expected observed_mask with shape [B,L,C] or [B,L], got {tuple(obs.shape)}")
+
+		# 1) read patch_size & expected input width of ts_embed
+		patch_size = getattr(self.backbone, "patch_size", 16)
+		in_proj = getattr(self.backbone, "in_proj", None)
+		if in_proj is None or not hasattr(in_proj, "hidden_layer"):
+			raise RuntimeError("Backbone has no in_proj.hidden_layer; cannot infer expected input width.")
+		Wexp = int(in_proj.hidden_layer.weight.shape[1])	# in_features
+
+		# 2) infer expected number of channels used inside each patch token
+		if Wexp % patch_size != 0:
+			raise RuntimeError(f"Wexp={Wexp} is not divisible by patch_size={patch_size}; cannot infer Creq.")
+		Creq = int(Wexp // patch_size)
+
+		# 3) Channel handling depends on patching mode
+		if self.patching_mode == "time_only":
+			# Mix channels inside each temporal patch: token width == patch_size*Creq, where Creq should match C (or we pad/truncate to Creq)
+			if C < Creq:
+				pad = torch.zeros(B, L, Creq - C, dtype=dtype, device=device)
+				x = torch.cat([x, pad], dim=-1)
+				obs = torch.cat([obs, torch.zeros_like(pad, dtype=torch.bool)], dim=-1)
+				C = Creq
+			elif C > Creq:
+				# Keep consistent with forward(): truncate to what the backbone expects
+				x = x[..., :Creq]
+				obs = obs[..., :Creq]
+				C = Creq
+		else:
+			# "time_variate": preserve ALL variates as separate tokens.
+			# Typically Moirai2-small has Creq=1 so token width == patch_size.
+			# We do not truncate C here.
+			if Creq != 1:
+				# Not fatal, but note: last-dim will be patch_size*Creq
+				pass
+
+		# 4) truncate L to multiple of patch_size and patchify
+		Lp = (L // patch_size) * patch_size
+		if Lp == 0:
+			raise RuntimeError(f"encode(): target length L={L} is smaller than patch_size={patch_size}.")
+
+		Ltok = Lp // patch_size
+
+		if self.patching_mode == "time_only":
+			# [B, Lp, Creq] -> [B, Ltok, patch_size*Creq]
+			x_view = x[:, :Lp, :].contiguous().view(B, Ltok, patch_size * Creq)
+			obs_view = obs[:, :Lp, :].contiguous().view(B, Ltok, patch_size * Creq)
+			x_tok, obs_tok = x_view, obs_view
+			N = Ltok
+
+			time_id = torch.arange(Ltok, device=device).view(1, -1).expand(B, Ltok)
+			sample_id = torch.arange(B, device=device).view(-1, 1).expand(B, Ltok)
+			variate_id = torch.zeros(B, Ltok, dtype=torch.long, device=device)
+
+		else:
+			# Per-variate tokens:
+			# reshape to [B, Ltok, patch_size, C] -> permute to [B, C, Ltok, patch_size] -> flatten to [B, C*Ltok, patch_size*Creq]
+			x_blk = x[:, :Lp, :].contiguous().view(B, Ltok, patch_size, C).permute(0, 3, 1, 2).contiguous()
+			obs_blk = obs[:, :Lp, :].contiguous().view(B, Ltok, patch_size, C).permute(0, 3, 1, 2).contiguous()
+			x_tok = x_blk.view(B, C * Ltok, patch_size * Creq)
+			obs_tok = obs_blk.view(B, C * Ltok, patch_size * Creq)
+			N = C * Ltok
+
+			time_row = torch.arange(Ltok, device=device).repeat(C)
+			var_row = torch.arange(C, device=device).repeat_interleave(Ltok)
+			time_id = time_row.view(1, -1).expand(B, N).contiguous()
+			variate_id = var_row.view(1, -1).expand(B, N).contiguous().long()
+			sample_id = torch.arange(B, device=device).view(-1, 1).expand(B, N)
+
+		# 5) prediction_mask aligned to token length
+		prediction_mask = batch.get("prediction_mask", None)
+		if prediction_mask is None:
+			prediction_mask = torch.zeros(B, N, dtype=torch.bool, device=device)
+		else:
+			# If user provided [B,L], rebuild to [B,N] (we cannot map per-timestep mask reliably without the same patchify rule; safest is zeros)
+			if prediction_mask.dim() == 2 and prediction_mask.shape[1] != N:
+				prediction_mask = torch.zeros(B, N, dtype=torch.bool, device=device)
+			elif prediction_mask.dim() != 2:
+				prediction_mask = torch.zeros(B, N, dtype=torch.bool, device=device)
+
+		# 6) call the backbone
+		out = self.backbone(
+			x_tok,
+			obs_tok,
+			sample_id,
+			time_id,
+			variate_id,
+			prediction_mask,
+			True,
+		)
+
+		reprs = self._get_reprs(out)	# expect [B, N, D] or [B*N, D]
+
+		# Normalize to [B, N, D]
+		if reprs.dim() == 2:
+			D = reprs.size(-1)
+			reprs = reprs.view(B, N, D)
+
+		# pooled [B, D]
+		pooled = reprs.mean(dim=1)
+		return pooled	
 		
 ###############################################
 ###   IMAGE-TS HYBRID MODEL
@@ -1218,41 +1343,49 @@ class MultimodalConcatMLP(torch.nn.Module):
 		labels=None,
 		**kwargs,
 	):
+		
+		# ----------------------------
+		# Video branch (backbone only)
+		# ----------------------------
 		if pixel_values is None:
 			raise KeyError("Expected 'pixel_values' in inputs.")
 
-		z_v = self._get_videomae_vec(pixel_values)
+		z_v = self._get_videomae_vec(pixel_values)	# [B, Dv]
 
-		if target is None or observed_mask is None or sample_id is None or time_id is None or variate_id is None or prediction_mask is None:
-			raise KeyError("Expected Uni2TS packed keys: target/observed_mask/sample_id/time_id/variate_id/prediction_mask")
+		# ----------------------------
+		# TS branch 
+		# (NB: use ts_model.encode to apply patchify consistently)
+		# ----------------------------
+		if target is None or observed_mask is None:
+			raise KeyError("Expected Uni2TS keys: target/observed_mask (at least).")
 
-		out = self.ts_backbone(
-			target,
-			observed_mask,
-			sample_id,
-			time_id,
-			variate_id,
-			prediction_mask,
-			True,
-		)
+		# ts_model.encode expects UNPATCHED shapes: target [B,L,C], observed_mask [B,L,C] or [B,L]
+		z_t = self.ts_model.encode(
+			target=target,
+			observed_mask=observed_mask,
+			sample_id=sample_id,
+			time_id=time_id,
+			variate_id=variate_id,
+			prediction_mask=prediction_mask,
+		)	# [B, Dt]
 
-		reprs = self._get_moirai_reprs(out)
-		if reprs.dim() == 2:
-			B, L = sample_id.shape
-			reprs = reprs.view(B, L, -1)
-
+		
+		# If ts_hidden wasn't known at init, update proj_t once (safe under single-process train;
+		# for DDP prefer to initialize ts_hidden earlier from config to avoid dynamic module creation).
 		if (self.ts_hidden is None) and (not self._ts_hidden_inferred):
-			self.ts_hidden = int(reprs.size(-1))
+			self.ts_hidden = int(z_t.size(-1))
 			self._ts_hidden_inferred = True
 			self._proj_t = torch.nn.Sequential(
 				torch.nn.LayerNorm(self.ts_hidden),
 				torch.nn.Linear(self.ts_hidden, self._proj_v[1].out_features),
 				torch.nn.GELU(),
 				torch.nn.Dropout(self._proj_v[-1].p),
-			)
-
-		z_t = self._pool_moirai(reprs, observed_mask, prediction_mask)
-
+			).to(device=z_t.device, dtype=z_t.dtype)
+		
+		
+		# ----------------------------
+		# Fusion head
+		# ----------------------------
 		h_v = self._proj_v(z_v)
 		h_t = self._proj_t(z_t)
 		h = torch.cat([h_v, h_t], dim=-1)
