@@ -1140,15 +1140,6 @@ class MultimodalConcatMLP(torch.nn.Module):
 			torch.nn.Linear(hidden_dim, num_labels),
 		)
 		
-		### COMMENTED AS NOW DONE IN run.py #############
-		# --- Freezing backbone?
-		#if freeze_video_backbone:
-		#	self._freeze_videomae(max_freeze_video_layer_id)
-
-		#if freeze_ts_backbone:
-		#	self._freeze_moirai(max_freeze_ts_layer_id)
-		#####################################
-		
 		# - Disable unimodal classifier heads (not used in multimodal forward)
 		if hasattr(self.video_model, "classifier") and isinstance(self.video_model.classifier, torch.nn.Module):
 			for p in self.video_model.classifier.parameters():
@@ -1163,53 +1154,175 @@ class MultimodalConcatMLP(torch.nn.Module):
 		"""Return the Moirai backbone without registering a duplicate module."""
 		return getattr(self.ts_model, "backbone", self.ts_model)
 
-	def _freeze_videomae(self, max_freeze_layer_id: int):
-		""" Freeze video MAE backbone """
-		logger.info("Freezing video model base layers ...")
-		encoder_name = "encoder"
-		layer_search_pattern = "layer"
+	def _infer_video_hidden(self) -> int:
+		# Try common HF config
+		cfg = getattr(self.video_model, "config", None)
+		if cfg is not None and hasattr(cfg, "hidden_size"):
+			return int(cfg.hidden_size)
 
-		for name, param in self.video_model.base_model.named_parameters():
-			if name.startswith(encoder_name):
-				layer_index = extract_layer_id(name, layer_search_pattern)
-				if max_freeze_layer_id == -1 or (layer_index != -1 and layer_index < max_freeze_layer_id):
-					param.requires_grad = False
+		# Try classifier in_features
+		if hasattr(self.video_model, "classifier") and hasattr(self.video_model.classifier, "in_features"):
+			return int(self.video_model.classifier.in_features)
 
-	def _freeze_moirai(self, max_freeze_layer_id: int):
-		""" Freeze Moirai backbone """
-		logger.info("Freezing Moirai encoder layers ...")
-		encoder_name = "encoder"
-		layer_search_pattern = "layers"
+		# Fallback: try base_model hidden_size
+		base = getattr(self.video_model, "base_model", None)
+		cfgb = getattr(base, "config", None) if base is not None else None
+		if cfgb is not None and hasattr(cfgb, "hidden_size"):
+			return int(cfgb.hidden_size)
 
-		for name, param in self.ts_backbone.named_parameters():
-			if name.startswith(encoder_name):
-				layer_index = extract_layer_id(name, layer_search_pattern)
-				if max_freeze_layer_id == -1 or (layer_index != -1 and layer_index < max_freeze_layer_id):
-					param.requires_grad = False
+		raise RuntimeError("Cannot infer video hidden size from video_model.")
+	
+	def _get_video_backbone(self):
+		# HF VideoMAEForVideoClassification: .base_model is VideoMAEModel
+		if hasattr(self.video_model, "base_model"):
+			return self.video_model.base_model
+		# Some HF models expose .videomae
+		if hasattr(self.video_model, "videomae"):
+			return self.video_model.videomae
+		return self.video_model
 
+	
 	def _get_videomae_vec(self, pixel_values: torch.Tensor) -> torch.Tensor:
-		# Always pull encoder reps, not classifier output
-		out = self.video_model.base_model(pixel_values=pixel_values, return_dict=True)
-		hs = out.last_hidden_state	# [B, N, D]
-		return hs[:, 0, :]			# CLS
+		backbone = self._get_video_backbone()
+		out = backbone(pixel_values=pixel_values, return_dict=True)
 
-	def _get_moirai_reprs(self, out):
-		if hasattr(out, "reprs"):
-			return out.reprs
-		return out
+		# Prefer last_hidden_state
+		if hasattr(out, "last_hidden_state") and out.last_hidden_state is not None:
+			hs = out.last_hidden_state	# [B, N, D]
+			if hs.dim() == 3:
+				return hs[:, 0, :]		# CLS token
+			return hs
 
-	def _pool_moirai(self, reprs: torch.Tensor, observed_mask: torch.Tensor, prediction_mask: torch.Tensor) -> torch.Tensor:
-		if reprs.dim() == 2:
-			raise RuntimeError("Packed reprs [B*L,D] must be reshaped before pooling.")
-		if reprs.dim() != 3:
-			raise RuntimeError(f"Unexpected reprs shape: {tuple(reprs.shape)}")
+		# Fallback to pooler_output
+		if hasattr(out, "pooler_output") and out.pooler_output is not None:
+			return out.pooler_output
 
-		obs = observed_mask
-		valid_obs = obs.any(dim=-1) if obs.dim() == 3 else obs
-		valid = valid_obs & (~prediction_mask)
-		m = valid.float().unsqueeze(-1)
-		den = m.sum(dim=1).clamp_min(1.0)
-		return (reprs * m).sum(dim=1) / den
+		raise RuntimeError("Cannot extract video features (no last_hidden_state/pooler_output).")
+
+
+	def _get_ts_reprs(self, out_t):
+		# Reuse wrapper helper if present
+		if hasattr(self.ts_model, "_get_reprs"):
+			return self.ts_model._get_reprs(out_t)
+
+		# HF-style outputs
+		if hasattr(out_t, "last_hidden_state") and out_t.last_hidden_state is not None:
+			return out_t.last_hidden_state
+
+		# Dict fallback
+		if isinstance(out_t, dict):
+			for k in ["reprs", "last_hidden_state", "hidden_states", "x"]:
+				if k in out_t and torch.is_tensor(out_t[k]):
+					return out_t[k]
+
+		# Tensor fallback
+		if torch.is_tensor(out_t):
+			return out_t
+
+		raise RuntimeError("Could not retrieve TS representations from ts_backbone output.")
+
+
+	def _pack_for_moirai(self, X: torch.Tensor, obs: torch.Tensor | None = None) -> dict:
+		"""
+		Repack raw TS [B,L,C] -> Moirai2Module-compatible packed fields.
+		We assume uni2ts ts_embed concatenates (values + mask) -> concat_factor=2.
+		"""
+		if X.dim() != 3:
+			raise RuntimeError(f"_pack_for_moirai expects X [B,L,C], got {tuple(X.shape)}")
+
+		B, L, C = X.shape
+		device, dtype = X.device, X.dtype
+
+		if obs is None:
+			obs = torch.ones(B, L, C, dtype=torch.bool, device=device)
+		else:
+			if obs.dim() == 2:
+				obs = obs.unsqueeze(-1).expand(B, L, C)
+			elif obs.dim() != 3:
+				raise RuntimeError(f"_pack_for_moirai obs must be [B,L] or [B,L,C], got {tuple(obs.shape)}")
+			obs = obs.to(device=device)
+			if obs.dtype != torch.bool:
+				obs = obs.to(torch.bool)
+
+		patch_size = int(getattr(self.ts_backbone, "patch_size", 16))
+
+		# Expected token width
+		in_proj = getattr(self.ts_backbone, "in_proj", None)
+		if in_proj is None or not hasattr(in_proj, "hidden_layer"):
+			raise RuntimeError("ts_backbone has no in_proj.hidden_layer; cannot infer expected input width.")
+		Wexp = int(in_proj.hidden_layer.in_features)
+
+		concat_factor = 2
+		if Wexp % (concat_factor * patch_size) != 0:
+			raise RuntimeError(f"Wexp={Wexp} not divisible by 2*patch_size={2*patch_size}; cannot infer Creq.")
+		Creq = int(Wexp // (concat_factor * patch_size))
+
+		# Trim length to multiple of patch_size
+		Lp = (L // patch_size) * patch_size
+		if Lp <= 0:
+			raise RuntimeError(f"Sequence too short: L={L}, patch_size={patch_size}")
+		if Lp != L:
+			X = X[:, :Lp, :]
+			obs = obs[:, :Lp, :]
+			L = Lp
+
+		Ltok = L // patch_size
+
+		if self.ts_patching_mode == "time_only":
+			# Need exactly Creq channels
+			if C < Creq:
+				pad = torch.zeros(B, L, Creq - C, dtype=dtype, device=device)
+				X = torch.cat([X, pad], dim=-1)
+				obs = torch.cat([obs, torch.zeros_like(pad, dtype=torch.bool)], dim=-1)
+				C = Creq
+			elif C > Creq:
+				X = X[..., :Creq]
+				obs = obs[..., :Creq]
+				C = Creq
+
+			N = Ltok
+			x_tok = X.contiguous().view(B, N, patch_size * Creq)
+			obs_tok = obs.contiguous().view(B, N, patch_size * Creq)
+
+			time_id = torch.arange(N, device=device).view(1, -1).expand(B, N)
+			sample_id = torch.arange(B, device=device).view(-1, 1).expand(B, N)
+			variate_id = torch.zeros(B, N, dtype=torch.long, device=device)
+
+		else:
+			# time_variate: tokens per "variate group" of size Creq
+			if C % Creq != 0:
+				Cpad = ((C + Creq - 1) // Creq) * Creq
+				pad = torch.zeros(B, L, Cpad - C, dtype=dtype, device=device)
+				X = torch.cat([X, pad], dim=-1)
+				obs = torch.cat([obs, torch.zeros_like(pad, dtype=torch.bool)], dim=-1)
+				C = Cpad
+
+			G = C // Creq	# number of variate-groups
+			# [B, L, C] -> [B, Ltok, ps, G, Creq] -> [B, G, Ltok, ps, Creq]
+			x_blk = X.contiguous().view(B, Ltok, patch_size, G, Creq).permute(0, 3, 1, 2, 4).contiguous()
+			obs_blk = obs.contiguous().view(B, Ltok, patch_size, G, Creq).permute(0, 3, 1, 2, 4).contiguous()
+
+			N = G * Ltok
+			x_tok = x_blk.view(B, N, patch_size * Creq)
+			obs_tok = obs_blk.view(B, N, patch_size * Creq)
+
+			time_grid = torch.arange(Ltok, device=device).view(1, 1, Ltok).expand(B, G, Ltok)
+			var_grid = torch.arange(G, device=device).view(1, G, 1).expand(B, G, Ltok)
+			time_id = time_grid.reshape(B, N)
+			variate_id = var_grid.reshape(B, N).long()
+			sample_id = torch.arange(B, device=device).view(-1, 1).expand(B, N)
+
+		pred_mask = torch.zeros(B, N, dtype=torch.bool, device=device)
+
+		return {
+			"target": x_tok,
+			"observed_mask": obs_tok,
+			"sample_id": sample_id,
+			"time_id": time_id,
+			"variate_id": variate_id,
+			"prediction_mask": pred_mask,
+		}
+
 
 	def forward(
 		self,
@@ -1223,69 +1336,86 @@ class MultimodalConcatMLP(torch.nn.Module):
 		labels=None,
 		**kwargs,
 	):
-		
 		# ----------------------------
-		# Video branch (backbone only)
+		# Video branch
 		# ----------------------------
 		if pixel_values is None:
 			raise KeyError("Expected 'pixel_values' in inputs.")
-
 		z_v = self._get_videomae_vec(pixel_values)	# [B, Dv]
 
 		# ----------------------------
-		# TS branch (packed Uni2TS -> call backbone directly)
+		# TS branch (packed preferred; repack raw if needed)
 		# ----------------------------
-		if target is None or observed_mask is None or sample_id is None or time_id is None or variate_id is None or prediction_mask is None:
-			raise KeyError("Expected Uni2TS packed keys: target/observed_mask/sample_id/time_id/variate_id/prediction_mask.")
+		if target is None:
+			raise KeyError("Expected 'target' in inputs.")
 
-		# Ensure mask dtypes (some pipelines might cast to float/int)
-		if observed_mask.dtype != torch.bool:
-			observed_mask = observed_mask.to(torch.bool)
-		if prediction_mask.dtype != torch.bool:
-			prediction_mask = prediction_mask.to(torch.bool)
+		Wexp = int(self.ts_backbone.in_proj.hidden_layer.in_features)
 
-		# Call Moirai backbone (no patchify here: already packed by Uni2TSBatchCollator)
-		out_t = self.ts_backbone(
-			target,
-			observed_mask,
-			sample_id,
-			time_id,
-			variate_id,
-			prediction_mask,
-			True,
-		)
+		need_repack = False
+		if not torch.is_tensor(target) or target.dim() != 3:
+			raise RuntimeError(f"Expected target tensor [B,*,*], got {type(target)} shape={getattr(target, 'shape', None)}")
 
-		# Retrieve representations
-		if hasattr(self.ts_model, "_get_reprs"):
-			reprs_t = self.ts_model._get_reprs(out_t)
+		# If IDs missing, it's not packed
+		if (sample_id is None) or (time_id is None) or (variate_id is None) or (prediction_mask is None) or (observed_mask is None):
+			need_repack = True
 		else:
-			# conservative fallback
-			if isinstance(out_t, dict):
-				reprs_t = out_t.get("reprs", None) or out_t.get("hidden_states", None) or out_t.get("x", None)
-			else:
-				reprs_t = out_t
-			if not isinstance(reprs_t, torch.Tensor):
-				raise RuntimeError("Could not retrieve TS backbone representations.")
+			# If token width doesn't match, it's not Moirai2 token format
+			if int(target.shape[-1]) != Wexp:
+				need_repack = True
 
-		# Normalize to [B, N, D]
+		if need_repack:
+			packed = self._pack_for_moirai(target, observed_mask)
+			out_t = self.ts_backbone(
+				packed["target"],
+				packed["observed_mask"],
+				packed["sample_id"],
+				packed["time_id"],
+				packed["variate_id"],
+				packed["prediction_mask"],
+				True,
+			)
+			obs_for_pool = packed["observed_mask"]
+			pmask_for_pool = packed["prediction_mask"]
+			ids_for_shape = packed["sample_id"]
+		else:
+			obs_m = observed_mask.to(torch.bool) if observed_mask.dtype != torch.bool else observed_mask
+			pmask = prediction_mask.to(torch.bool) if prediction_mask.dtype != torch.bool else prediction_mask
+
+			out_t = self.ts_backbone(
+				target,
+				obs_m,
+				sample_id,
+				time_id,
+				variate_id,
+				pmask,
+				True,
+			)
+			obs_for_pool = obs_m
+			pmask_for_pool = pmask
+			ids_for_shape = sample_id
+
+		reprs_t = self._get_ts_reprs(out_t)
+
+		# Normalize to [B, N, Dt]
 		if reprs_t.dim() == 2:
-			B, N = sample_id.shape
+			B, N = ids_for_shape.shape
 			reprs_t = reprs_t.view(B, N, -1)
 		elif reprs_t.dim() != 3:
 			raise RuntimeError(f"Unexpected TS reprs shape: {tuple(reprs_t.shape)}")
 
 		# Masked mean pooling over tokens (valid = observed & not prediction)
-		valid_obs = observed_mask.any(dim=-1) if observed_mask.dim() == 3 else observed_mask	# [B,N]
-		valid = valid_obs & (~prediction_mask)													# [B,N]
-		w = valid.float().unsqueeze(-1)															# [B,N,1]
-		den = w.sum(dim=1).clamp_min(1.0)														# [B,1]
-		z_t = (reprs_t * w).sum(dim=1) / den													# [B,Dt]
+		valid_obs = obs_for_pool.any(dim=-1) if obs_for_pool.dim() == 3 else obs_for_pool	# [B,N]
+		valid = valid_obs & (~pmask_for_pool)												# [B,N]
+		w = valid.float().unsqueeze(-1)														# [B,N,1]
+		den = w.sum(dim=1).clamp_min(1.0)													# [B,1]
+		z_t = (reprs_t * w).sum(dim=1) / den												# [B,Dt]
 
 		# Lazy init proj_t based on Dt
 		if self._proj_t is None:
+			Dt = int(z_t.size(-1))
 			self._proj_t = torch.nn.Sequential(
-				torch.nn.LayerNorm(int(z_t.size(-1))),
-				torch.nn.Linear(int(z_t.size(-1)), self._hidden_dim),
+				torch.nn.LayerNorm(Dt),
+				torch.nn.Linear(Dt, self._hidden_dim),
 				torch.nn.GELU(),
 				torch.nn.Dropout(self._fusion_dropout),
 			).to(device=z_t.device, dtype=z_t.dtype)
@@ -1293,10 +1423,9 @@ class MultimodalConcatMLP(torch.nn.Module):
 		# ----------------------------
 		# Fusion head
 		# ----------------------------
-		h_v = self._proj_v(z_v)					# [B,H]
-		h_t = self._proj_t(z_t)					# [B,H]
-		h = torch.cat([h_v, h_t], dim=-1)		# [B,2H]
-		logits = self._head(h)					# [B,num_labels]
+		h_v = self._proj_v(z_v)
+		h_t = self._proj_t(z_t)
+		h = torch.cat([h_v, h_t], dim=-1)
+		logits = self._head(h)
 
 		return SequenceClassifierOutput(logits=logits)
-		
