@@ -908,10 +908,6 @@ def load_multimodal_model(
 		num_labels=num_out,
 		hidden_dim=args.mm_hidden_dim,
 		dropout=args.head_dropout,
-		freeze_video_backbone=args.freeze_backbone,
-		max_freeze_video_layer_id=args.max_freeze_layer_id,
-		freeze_ts_backbone=args.ts_freeze_backbone,
-		max_freeze_ts_layer_id=args.ts_max_freeze_layer_id,
 	)
 
 	# -----------------------

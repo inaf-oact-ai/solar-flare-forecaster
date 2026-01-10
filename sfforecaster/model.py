@@ -1068,15 +1068,17 @@ class ImageFeatTSClassifier(torch.nn.Module):
 
 class MultimodalConcatMLP(torch.nn.Module):
 	"""
-	Multimodal fusion:
-		VideoMAE encoder -> z_v  [B, Dv]
-		Moirai encoder   -> z_t  [B, Dt]
-		concat([z_v,z_t]) -> MLP -> logits
+	Multimodal fusion model (Concat + MLP head) for:
+	- Video branch: VideoMAE backbone features (CLS token or mean pooled)
+	- TS branch: Moirai2 backbone features from Uni2TS-packed batch
 
 	Expected batch keys (from VideoUni2TSMultimodalCollator):
-		- pixel_values
-		- target, observed_mask, sample_id, time_id, variate_id, prediction_mask
-		- labels (used by CustomTrainer, not here)
+	- pixel_values: [B, T, C, H, W]
+	- target: [B, N, P] (packed) OR [B, L, C] (raw, will be repacked)
+	- observed_mask: [B, N, P] (packed) OR [B, L, C]/[B, L] (raw)
+	- sample_id, time_id, variate_id: [B, N] (packed)
+	- prediction_mask: [B, N] (packed)
+	- labels: [B] or [B,1] (handled by trainer)
 	"""
 
 	def __init__(
@@ -1086,68 +1088,56 @@ class MultimodalConcatMLP(torch.nn.Module):
 		num_labels: int,
 		hidden_dim: int = 512,
 		dropout: float = 0.1,
-		freeze_video_backbone: bool = False,
-		max_freeze_video_layer_id: int = -1,
-		freeze_ts_backbone: bool = False,
-		max_freeze_ts_layer_id: int = -1,
 	):
 		super().__init__()
 
 		# --- Video encoder (VideoMAE)
 		self.video_model = video_model
 		self.video_hidden = int(self.video_model.config.hidden_size)
-		self.freeze_video_backbone= freeze_video_backbone
-		self.max_freeze_video_layer_id= max_freeze_video_layer_id
-
+		
 		# --- TS encoder (Moirai backbone)
 		self.ts_model = ts_model
 		#self.ts_backbone = getattr(ts_model, "backbone", ts_model) ## Do NOT register the same backbone twice. Access backbone via property below.
-		self.freeze_ts_backbone= freeze_ts_backbone
-		self.max_freeze_ts_layer_id= max_freeze_ts_layer_id
-
-		# Try to infer Moirai repr dim from config; otherwise lazy-init later
-		self.ts_hidden = getattr(getattr(self.ts_backbone, "config", None), "d_model", None)
-		if self.ts_hidden is None:
-			self.ts_hidden = getattr(getattr(self.ts_backbone, "config", None), "hidden_size", None)
-		self._ts_hidden_inferred = False # If still None, we'll infer at first forward pass
-
-		# --- Fusion head
-		self._hidden_dim = int(hidden_dim)
-		self._fusion_dropout = float(dropout)
-		ts_dim = int(self.ts_hidden) if self.ts_hidden is not None else hidden_dim
-
-		self._proj_v = torch.nn.Sequential(
-			torch.nn.LayerNorm(self.video_hidden),
-			torch.nn.Linear(self.video_hidden, hidden_dim),
-			torch.nn.GELU(),
-			torch.nn.Dropout(dropout),
-		)
-
-		#self._proj_t = torch.nn.Sequential(
-		#	torch.nn.LayerNorm(ts_dim),
-		#	torch.nn.Linear(ts_dim, hidden_dim),
-		#	torch.nn.GELU(),
-		#	torch.nn.Dropout(dropout),
-		#)
-		# lazy init at first forward (Dt can vary across Moirai checkpoints)
-		self._proj_t = None
-
-		self._head = torch.nn.Sequential(
-			torch.nn.LayerNorm(2 * hidden_dim),
-			torch.nn.Linear(2 * hidden_dim, hidden_dim),
-			torch.nn.GELU(),
-			torch.nn.Dropout(dropout),
-			torch.nn.Linear(hidden_dim, num_labels),
-		)
 		
-		# - Disable unimodal classifier heads (not used in multimodal forward)
+		self.num_labels = int(num_labels)
+		
+		# Patching mode (used only if we ever need to repack raw [B,L,C])
+		self.ts_patching_mode = getattr(ts_model, "patching_mode", "time_only")
+		
+		# Freeze unimodal classifier heads (not used in fusion)
 		if hasattr(self.video_model, "classifier") and isinstance(self.video_model.classifier, torch.nn.Module):
 			for p in self.video_model.classifier.parameters():
 				p.requires_grad = False
 
+		# Moirai wrapper may lazily create classifier; freeze if it already exists
 		if hasattr(self.ts_model, "classifier") and isinstance(self.ts_model.classifier, torch.nn.Module):
 			for p in self.ts_model.classifier.parameters():
 				p.requires_grad = False
+
+		# Infer video hidden size
+		self.video_hidden = self._infer_video_hidden()
+
+		self._hidden_dim = int(hidden_dim)
+		self._fusion_dropout = float(dropout)
+
+		self._proj_v = torch.nn.Sequential(
+			torch.nn.LayerNorm(self.video_hidden),
+			torch.nn.Linear(self.video_hidden, self._hidden_dim),
+			torch.nn.GELU(),
+			torch.nn.Dropout(self._fusion_dropout),
+		)
+
+		# Lazy init at first forward (Dt depends on TS backbone output dim)
+		self._proj_t = None
+
+		self._head = torch.nn.Sequential(
+			torch.nn.LayerNorm(2 * self._hidden_dim),
+			torch.nn.Linear(2 * self._hidden_dim, self._hidden_dim),
+			torch.nn.GELU(),
+			torch.nn.Dropout(self._fusion_dropout),
+			torch.nn.Linear(self._hidden_dim, self.num_labels),
+		)
+
 
 	@property
 	def ts_backbone(self):
