@@ -540,11 +540,13 @@ def load_videomae_model(
 	
 	if inference_mode:
 		# - Load model for inference
+		logger.info("Loading VideoMAE for inference ...")
 		model = VideoMAEForVideoClassification.from_pretrained(args.model)
 		
 		# - Ensure head matches the checkpoint if it was trained with Dropout+Linear
 		try:
 			ckpt = ckpt_override if ckpt_override else args.model
+			logger.info(f"Loading checkpoint {ckpt} in VideoMAE ...")
 			state = load_state_dict_any(ckpt) # works with checkpoint dir or .bin/.safetensors
 			needs_seq_head = any(k.startswith("classifier.1.") for k in state.keys())
 			has_plain_linear = hasattr(model, "classifier") and isinstance(model.classifier, torch.nn.Linear)
@@ -555,6 +557,7 @@ def load_videomae_model(
 				p = getattr(getattr(model, "config", object()), "head_dropout", args.head_dropout)
 				maybe_wrap_classifier_with_dropout(model, p)
 				# reload so classifier.* weights map correctly
+				logger.info("Reload model weights so classifier.* weights map correctly ...")
 				model.load_state_dict(state, strict=False)
 		except Exception as e:
 			logger.warning(f"Classifier head alignment skipped (non-fatal): {e}")
@@ -565,6 +568,7 @@ def load_videomae_model(
 		# - Load model for training
 		try:
 			if args.binary:
+				logger.info("Loading VideMAE for training (num_labels=1) ...")
 				model = VideoMAEForVideoClassification.from_pretrained(args.model, num_labels=1) # tmp
 				in_features = model.classifier.in_features
 				model.classifier = torch.nn.Linear(in_features, 1)
@@ -572,6 +576,7 @@ def load_videomae_model(
 				model.config.problem_type = None
 		
 			else:
+				logger.info(f"Loading VideMAE for training (num_labels={num_labels}) ...")
 				model = VideoMAEForVideoClassification.from_pretrained(
 					args.model,
 					problem_type="single_label_classification", 
@@ -607,6 +612,8 @@ def load_videomae_model(
 		#		torch.nn.Linear(in_features, out_features)
 		#	)
 	
+	print("== VIDEO MAE CONFIG ==")
+	print(model.config)
 		
 	# - Load processor
 	image_processor = VideoMAEImageProcessor.from_pretrained(args.model)
@@ -828,6 +835,7 @@ def load_multimodal_model(
 	# -----------------------
 	if mm_init == "pretrained":
 		# Use pretrained weights only (no branch ckpts)
+		logger.info(f"[pretrained init] - Loading video model (num_labels={num_labels}, nclasses={nclasses}, video_inference_mode=False) ...")
 		video_model, image_processor = load_video_model(
 			args=args,
 			id2label=id2label,
@@ -837,6 +845,8 @@ def load_multimodal_model(
 			inference_mode=False,
 			ckpt_override=""
 		)
+		
+		logger.info(f"[pretrained init] - Loading ts model (num_labels={num_labels}, nclasses={nclasses}, ts_inference_mode=False) ...")
 		ts_model, _tp = load_ts_model(
 			args=args,
 			id2label=id2label,
@@ -850,6 +860,7 @@ def load_multimodal_model(
 	elif mm_init == "unimodal":
 		# Init from separately trained unimodal ckpts (if provided), otherwise pretrained
 		video_inference_mode= (True if video_ckpt else False)
+		logger.info(f"[unimodal init] - Loading video model (num_labels={num_labels}, nclasses={nclasses}, video_inference_mode=video_inference_mode) ...")
 		video_model, image_processor = load_video_model(
 			args=args,
 			id2label=id2label,
@@ -863,6 +874,7 @@ def load_multimodal_model(
 			video_model.train()
 		
 		ts_inference_mode= (True if ts_ckpt else False)
+		logger.info(f"[unimodal init] - Loading ts model (num_labels={num_labels}, nclasses={nclasses}, ts_inference_mode=ts_inference_mode) ...")
 		ts_model, _tp = load_ts_model(
 			args=args,
 			id2label=id2label,
@@ -877,23 +889,28 @@ def load_multimodal_model(
 
 	elif mm_init == "multimodal":
 		# For multimodal ckpt init we still need a *skeleton* model.
-		# Build branches from pretrained or from branch ckpts if provided.
+		# Build branches from pretrained or from branch ckpts if provided
+		video_inference_mode= (True if video_ckpt else False)
+		logger.info(f"[multimodal init] - Loading video model (num_labels={num_labels}, nclasses={nclasses}, video_inference_mode=video_inference_mode) ...")
 		video_model, image_processor = load_video_model(
 			args=args,
 			id2label=id2label,
 			label2id=label2id,
 			num_labels=num_labels,
 			nclasses=nclasses,
-			inference_mode=(True if video_ckpt else False),
+			inference_mode=video_inference_mode,
 			ckpt_override=video_ckpt
 		)
+		
+		ts_inference_mode= (True if ts_ckpt else False)
+		logger.info(f"[multimodal init] - Loading ts model (num_labels={num_labels}, nclasses={nclasses}, ts_inference_mode=ts_inference_mode) ...")
 		ts_model, _tp = load_ts_model(
 			args=args,
 			id2label=id2label,
 			label2id=label2id,
 			num_labels=num_labels,
 			nclasses=nclasses,
-			inference_mode=(True if ts_ckpt else False),
+			inference_mode=ts_inference_mode,
 			ckpt_override=ts_ckpt
 		)
 	else:
@@ -902,6 +919,7 @@ def load_multimodal_model(
 	# -----------------------
 	# 2) Build fusion model
 	# -----------------------
+	logger.info(f"Building MultimodalConcatMLP model (num_labels={num_out}, hidden_dim={hidden_dim}, dropout={args.head_dropout}) ...")
 	model = MultimodalConcatMLP(
 		video_model=video_model,
 		ts_model=ts_model,

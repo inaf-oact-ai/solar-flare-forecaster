@@ -364,9 +364,9 @@ def maybe_wrap_classifier_with_dropout(model, p: float, num_out: int | None = No
 		return  # already wrapped
 		
 	if isinstance(clf, torch.nn.Linear):
-		print("Adding dropout layer in classifier head ...")
 		in_features  = clf.in_features
 		out_features = num_out if num_out is not None else clf.out_features
+		print(f"Adding dropout layer in classifier head (out_features={out_features}) ...")
 		model.classifier = torch.nn.Sequential(
 			torch.nn.Dropout(p=float(p)),
 			torch.nn.Linear(in_features, out_features)
