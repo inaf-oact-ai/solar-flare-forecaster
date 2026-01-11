@@ -860,7 +860,7 @@ def load_multimodal_model(
 	elif mm_init == "unimodal":
 		# Init from separately trained unimodal ckpts (if provided), otherwise pretrained
 		video_inference_mode= (True if video_ckpt else False)
-		logger.info(f"[unimodal init] - Loading video model (num_labels={num_labels}, nclasses={nclasses}, video_inference_mode=video_inference_mode) ...")
+		logger.info(f"[unimodal init] - Loading video model (num_labels={num_labels}, nclasses={nclasses}, video_inference_mode={video_inference_mode}) ...")
 		video_model, image_processor = load_video_model(
 			args=args,
 			id2label=id2label,
@@ -874,7 +874,7 @@ def load_multimodal_model(
 			video_model.train()
 		
 		ts_inference_mode= (True if ts_ckpt else False)
-		logger.info(f"[unimodal init] - Loading ts model (num_labels={num_labels}, nclasses={nclasses}, ts_inference_mode=ts_inference_mode) ...")
+		logger.info(f"[unimodal init] - Loading ts model (num_labels={num_labels}, nclasses={nclasses}, ts_inference_mode={ts_inference_mode}) ...")
 		ts_model, _tp = load_ts_model(
 			args=args,
 			id2label=id2label,
@@ -891,7 +891,7 @@ def load_multimodal_model(
 		# For multimodal ckpt init we still need a *skeleton* model.
 		# Build branches from pretrained or from branch ckpts if provided
 		video_inference_mode= (True if video_ckpt else False)
-		logger.info(f"[multimodal init] - Loading video model (num_labels={num_labels}, nclasses={nclasses}, video_inference_mode=video_inference_mode) ...")
+		logger.info(f"[multimodal init] - Loading video model (num_labels={num_labels}, nclasses={nclasses}, video_inference_mode={video_inference_mode}) ...")
 		video_model, image_processor = load_video_model(
 			args=args,
 			id2label=id2label,
@@ -903,7 +903,7 @@ def load_multimodal_model(
 		)
 		
 		ts_inference_mode= (True if ts_ckpt else False)
-		logger.info(f"[multimodal init] - Loading ts model (num_labels={num_labels}, nclasses={nclasses}, ts_inference_mode=ts_inference_mode) ...")
+		logger.info(f"[multimodal init] - Loading ts model (num_labels={num_labels}, nclasses={nclasses}, ts_inference_mode={ts_inference_mode}) ...")
 		ts_model, _tp = load_ts_model(
 			args=args,
 			id2label=id2label,
