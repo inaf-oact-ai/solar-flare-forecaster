@@ -919,7 +919,7 @@ def load_multimodal_model(
 	# -----------------------
 	# 2) Build fusion model
 	# -----------------------
-	logger.info(f"Building MultimodalConcatMLP model (num_labels={num_out}, hidden_dim={hidden_dim}, dropout={args.head_dropout}) ...")
+	logger.info(f"Building MultimodalConcatMLP model (num_labels={num_out}, hidden_dim={args.mm_hidden_dim}, dropout={args.head_dropout}) ...")
 	model = MultimodalConcatMLP(
 		video_model=video_model,
 		ts_model=ts_model,
