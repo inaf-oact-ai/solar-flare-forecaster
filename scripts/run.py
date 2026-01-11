@@ -540,7 +540,7 @@ def load_videomae_model(
 	
 	if inference_mode:
 		# - Load model for inference
-		logger.info("Loading VideoMAE for inference ...")
+		logger.info(f"Loading VideoMAE for inference from model {args.model} ...")
 		model = VideoMAEForVideoClassification.from_pretrained(args.model)
 		
 		# - Ensure head matches the checkpoint if it was trained with Dropout+Linear
