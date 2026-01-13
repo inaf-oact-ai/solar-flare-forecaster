@@ -160,6 +160,8 @@ def get_args():
 	# - Model options (TIME SERIES)	
 	parser.add_argument('-model_ts_backbone', '--model_ts_backbone', dest='model_ts_backbone', required=False, type=str, default="Salesforce/moirai-2.0-R-small", action='store', help='Model TS backbone name')
 	parser.add_argument("--ts_patching_mode", dest='ts_patching_mode', type=str, choices=["time_only", "time_variate"], default="time_variate", help="Patching mode to be used with input ts variates")
+	parser.add_argument("--ts_token_order", dest="ts_token_order", type=str, choices=["by_variate", "interleave_time"], default="by_variate", help="Token flattening order when using time_variate patching: by_variate (current) or interleave_time (time-major).")
+	
 	parser.add_argument('-model_ts_img_backbone', '--model_ts_img_backbone', dest='model_ts_img_backbone', required=False, type=str, default="google/siglip2-base-patch16-224", action='store', help='Model imgfeatts image backbone name')
 	parser.add_argument('-proj_dim', '--proj_dim', dest='proj_dim', required=False, type=int, default=128, action='store',help='Size of linear projection layer in ImageFeatTSClassifier model (default=128)')
 	
@@ -568,7 +570,7 @@ def load_videomae_model(
 		# - Load model for training
 		try:
 			if args.binary:
-				logger.info("Loading VideMAE for training (num_labels=1) ...")
+				logger.info("Loading VideoMAE for training (num_labels=1) ...")
 				model = VideoMAEForVideoClassification.from_pretrained(args.model, num_labels=1) # tmp
 				in_features = model.classifier.in_features
 				model.classifier = torch.nn.Linear(in_features, 1)
@@ -576,7 +578,7 @@ def load_videomae_model(
 				model.config.problem_type = None
 		
 			else:
-				logger.info(f"Loading VideMAE for training (num_labels={num_labels}) ...")
+				logger.info(f"Loading VideoMAE for training (num_labels={num_labels}) ...")
 				model = VideoMAEForVideoClassification.from_pretrained(
 					args.model,
 					problem_type="single_label_classification", 
@@ -654,6 +656,7 @@ def load_imgfeatts_model(
 		num_labels=num_out,
 		proj_dim=args.proj_dim,
 		patching_mode=args.ts_patching_mode,
+		token_order=args.ts_token_order,
 		freeze_backbone=args.ts_freeze_backbone,
 		max_freeze_layer_id=args.ts_max_freeze_layer_id,
 		freeze_img_backbone=args.freeze_backbone,
@@ -748,7 +751,8 @@ def load_ts_model(
 		num_labels=num_out,
 		freeze_backbone=args.ts_freeze_backbone,
 		max_freeze_layer_id=args.ts_max_freeze_layer_id,
-		patching_mode=args.ts_patching_mode
+		patching_mode=args.ts_patching_mode,
+		token_order=args.ts_token_order,
 	)
 	
 	# keep config in sync for your Trainer / metrics

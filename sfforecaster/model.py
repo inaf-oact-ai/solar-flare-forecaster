@@ -188,7 +188,8 @@ class MoiraiForSequenceClassification(torch.nn.Module):
 		num_labels: int = 4, 
 		freeze_backbone: bool = False,
 		max_freeze_layer_id: int = -1,
-		patching_mode: str = "time_only" # "time_only" | "time_variate"
+		patching_mode: str = "time_only", # "time_only" | "time_variate"
+		token_order: str = "by_variate",  # "by_variate" | "interleave_time"
 	):
 		super().__init__()
 		self.backbone = _M.from_pretrained(pretrained_name)
@@ -197,6 +198,8 @@ class MoiraiForSequenceClassification(torch.nn.Module):
 		
 		assert patching_mode in ("time_only", "time_variate")
 		self.patching_mode = patching_mode
+		assert token_order in ("by_variate", "interleave_time")
+		self.token_order = token_order
 		
 		d_model = getattr(self.backbone, "d_model", 384)
 		self.config = MoiraiTSConfig(num_labels=num_labels, d_model=d_model)
@@ -310,16 +313,7 @@ class MoiraiForSequenceClassification(torch.nn.Module):
 		# 3) make obs 3-D if needed
 		if obs.dim() == 2:
 			obs = obs.unsqueeze(-1).expand(B, L, C)
-
-		# 4) pad/truncate channels to Creq, depending on patching mode
-		#if C < Creq:
-		#	pad = torch.zeros(B, L, Creq - C, dtype=dtype, device=device)
-		#	x   = torch.cat([x, pad], dim=-1)
-		#	obs = torch.cat([obs, torch.zeros_like(pad, dtype=torch.bool)], dim=-1)
-		#elif C > Creq:
-		#	x   = x[..., :Creq]
-		#	obs = obs[..., :Creq]
-			
+	
 		# 4) Channel handling depends on patching mode
 		if self.patching_mode == "time_only":
 			# Mix channels inside each temporal patch.
@@ -367,26 +361,65 @@ class MoiraiForSequenceClassification(torch.nn.Module):
 			sample_id = torch.arange(B,    device=device).view(-1, 1).expand(B, Ltok)
 			variate_id= torch.zeros(B, Ltok, dtype=torch.long, device=device)
 		else:
-			# Per-variate tokens:
-			# reshape to [B, L', ps, C] -> permute to [B, C, L', ps] -> flatten to [B, C*L', ps*Creq]
-			x_blk   = x[:, :Lp, :].contiguous().view(B, Ltok, patch_size, C).permute(0, 3, 1, 2).contiguous()
-			obs_blk = obs[:, :Lp, :].contiguous().view(B, Ltok, patch_size, C).permute(0, 3, 1, 2).contiguous()
-			x_tok   = x_blk.view(B, C * Ltok, patch_size * Creq)     # typically last dim == patch_size
-			obs_tok = obs_blk.view(B, C * Ltok, patch_size * Creq)
-			N = C * Ltok
-			# IDs
-			# time ids repeat for each variate; variate ids repeat Ltok times
-			time_row  = torch.arange(Ltok, device=device).repeat(C)                 # [C*L']
-			var_row   = torch.arange(C, device=device).repeat_interleave(Ltok)      # [C*L']
-			time_id   = time_row.view(1, -1).expand(B, N).contiguous()
-			variate_id= var_row.view(1, -1).expand(B, N).contiguous().long()
-			sample_id = torch.arange(B, device=device).view(-1, 1).expand(B, N)
+		
+			# "time_variate": one token per (time-patch, variate) pair.
+			# We support two flattening orders:
+			#  - by_variate      : [v0(t0..tL'), v1(t0..tL'), ...]
+			#  - interleave_time : [t0(v0..vC), t1(v0..vC), ...]
+			x_4d   = x[:, :Lp, :].contiguous().view(B, Ltok, patch_size, C)
+			obs_4d = obs[:, :Lp, :].contiguous().view(B, Ltok, patch_size, C)
 
-		# 6) rebuild ids/masks to match L'
-		#time_id         = torch.arange(Ltok, device=device).view(1, -1).expand(B, Ltok)
-		#sample_id       = torch.arange(B,    device=device).view(-1, 1).expand(B, Ltok)
-		#variate_id      = torch.zeros(B, Ltok, dtype=torch.long, device=device)
-		#prediction_mask = torch.zeros(B, Ltok, dtype=torch.bool, device=device)
+
+			if self.token_order == "by_variate":
+				# [B, L', ps, C] -> [B, C, L', ps] -> [B, C*L', ps*Creq]
+				x_blk   = x_4d.permute(0, 3, 1, 2).contiguous()
+				obs_blk = obs_4d.permute(0, 3, 1, 2).contiguous()
+				x_tok   = x_blk.view(B, C * Ltok, patch_size * Creq) # typically last dim == patch_size
+				obs_tok = obs_blk.view(B, C * Ltok, patch_size * Creq)
+				N = C * Ltok
+				# IDs: time varies fastest within a variate block
+				# time ids repeat for each variate; variate ids repeat Ltok times
+				# token index k = v*Ltok + t
+				time_row = torch.arange(Ltok, device=device).repeat(C)            # [C*L']
+				var_row  = torch.arange(C, device=device).repeat_interleave(Ltok) # [C*L']
+				time_id    = time_row.view(1, -1).expand(B, N).contiguous()
+				variate_id = var_row.view(1, -1).expand(B, N).contiguous().long()
+				sample_id  = torch.arange(B, device=device).view(-1, 1).expand(B, N)
+		
+				# Per-variate tokens:
+				# reshape to [B, L', ps, C] -> permute to [B, C, L', ps] -> flatten to [B, C*L', ps*Creq]
+				#x_blk   = x[:, :Lp, :].contiguous().view(B, Ltok, patch_size, C).permute(0, 3, 1, 2).contiguous()
+				#obs_blk = obs[:, :Lp, :].contiguous().view(B, Ltok, patch_size, C).permute(0, 3, 1, 2).contiguous()
+				#x_tok   = x_blk.view(B, C * Ltok, patch_size * Creq)     # typically last dim == patch_size
+				#obs_tok = obs_blk.view(B, C * Ltok, patch_size * Creq)
+				#N = C * Ltok
+				# IDs
+				# time ids repeat for each variate; variate ids repeat Ltok times
+				#time_row  = torch.arange(Ltok, device=device).repeat(C)                 # [C*L']
+				#var_row   = torch.arange(C, device=device).repeat_interleave(Ltok)      # [C*L']
+				#time_id   = time_row.view(1, -1).expand(B, N).contiguous()
+				#variate_id= var_row.view(1, -1).expand(B, N).contiguous().long()
+				#sample_id = torch.arange(B, device=device).view(-1, 1).expand(B, N)
+				
+			elif self.token_order == "interleave_time":
+				# interleave_time:
+				# [B, L', ps, C] -> [B, L', C, ps] -> [B, L'*C, ps*Creq]
+				x_blk   = x_4d.permute(0, 1, 3, 2).contiguous()
+				obs_blk = obs_4d.permute(0, 1, 3, 2).contiguous()
+				x_tok   = x_blk.view(B, Ltok * C, patch_size * Creq)
+				obs_tok = obs_blk.view(B, Ltok * C, patch_size * Creq)
+				N = Ltok * C
+
+				# IDs: variate varies fastest within each time step
+				# token index k = t*C + v
+				time_row = torch.arange(Ltok, device=device).repeat_interleave(C) # [L'*C]
+				var_row  = torch.arange(C, device=device).repeat(Ltok)            # [L'*C]
+				time_id    = time_row.view(1, -1).expand(B, N).contiguous()
+				variate_id = var_row.view(1, -1).expand(B, N).contiguous().long()
+				sample_id  = torch.arange(B, device=device).view(-1, 1).expand(B, N)
+
+			else:
+				raise RuntimeError("Invalid/unexpected token_order given!")
 		
 		# 6) prediction mask shaped to token length
 		prediction_mask = torch.zeros(B, N, dtype=torch.bool, device=device)
@@ -655,6 +688,7 @@ class ImageFeatTSClassifier(torch.nn.Module):
 		num_labels: int = 4,
 		proj_dim: int = 128,
 		patching_mode: str = "time_variate",  # "time_only" | "time_variate"
+		token_order: str = "by_variate",  # "by_variate" | "interleave_time"
 		freeze_backbone: bool = False,
 		max_freeze_layer_id: int = -1,
 		freeze_img_backbone: bool = False,
@@ -668,11 +702,14 @@ class ImageFeatTSClassifier(torch.nn.Module):
 	):
 		super().__init__()
 		assert patching_mode in ("time_only", "time_variate")
+		assert token_order in ("by_variate", "interleave_time")
+		
 		if _M is None:
 			raise RuntimeError("uni2ts not available; cannot build Moirai backbone.")
 
 		# - Set options
 		self.patching_mode = patching_mode
+		self.token_order = token_order
 		self.classifier = None
 		self.num_labels = num_labels
 		self.freeze_img_backbone= freeze_img_backbone
@@ -969,22 +1006,62 @@ class ImageFeatTSClassifier(torch.nn.Module):
 				obs = obs[:, :Lp, :]
             
 			Ltok = Lp // patch_size
+			
+			
+			# time_variate: one token per (time-patch, variate)
+			# Support two token orders:
+			#  - by_variate      : [v0(t0..tL), v1(t0..tL), ...]
+			#  - interleave_time : [t0(v0..vC), t1(v0..vC), ...]
+			#x_4d   = x[:, :Lp, :].contiguous().view(B, Ltok, patch_size, C)      # [B, Ltok, ps, C]
+			#obs_4d = obs[:, :Lp, :].contiguous().view(B, Ltok, patch_size, C)    # [B, Ltok, ps, C]
+			x_4d   = X.view(B, Ltok, patch_size, C)
+			obs_4d = obs.view(B, Ltok, patch_size, C)
+
+			if self.token_order=="by_variate":
+				# by_variate (current): [B, C, Ltok, ps] -> [B, C*Ltok, ps*Creq]
+				x_blk   = x_4d.permute(0, 3, 1, 2).contiguous()    # [B, C, Ltok, ps]
+				obs_blk = obs_4d.permute(0, 3, 1, 2).contiguous()
+				N = C * Ltok
+				#x_tok   = x_blk.view(B, N, patch_size * Creq)
+				#obs_tok = obs_blk.view(B, N, patch_size * Creq)
+				x_tok   = x_blk.view(B, C * Ltok, patch_size * Creq).clone()
+				obs_tok = obs_blk.view(B, C * Ltok, patch_size * Creq).clone()
+				# IDs: token index k = v*Ltok + t
+				time_row = torch.arange(Ltok, device=device).repeat(C)             # [C*Ltok]
+				var_row  = torch.arange(C, device=device).repeat_interleave(Ltok)  # [C*Ltok]
+			
+			elif self.token_order=="interleave_time":
+				# [B, Ltok, ps, C] -> [B, Ltok, C, ps] -> [B, Ltok*C, ps*Creq]
+				x_blk   = x_4d.permute(0, 1, 3, 2).contiguous()    # [B, Ltok, C, ps]
+				obs_blk = obs_4d.permute(0, 1, 3, 2).contiguous()
+				N = Ltok * C
+				#x_tok   = x_blk.view(B, N, patch_size * Creq)
+				#obs_tok = obs_blk.view(B, N, patch_size * Creq)
+				x_tok = x_blk.view(B, Ltok * C, patch_size * Creq).clone()
+				obs_tok = obs_blk.view(B, Ltok * C, patch_size * Creq)
+				
+				# IDs: token index k = t*C + v
+				time_row = torch.arange(Ltok, device=device).repeat_interleave(C)  # [Ltok*C]
+				var_row  = torch.arange(C, device=device).repeat(Ltok)             # [Ltok*C]
+			else:
+				raise RuntimeError(f"Invalid/unsupported token_order={self.token_order} given.")
+				
+			time_id    = time_row.view(1, -1).expand(B, N).contiguous()
+			variate_id = var_row.view(1, -1).expand(B, N).contiguous().long()
+			sample_id  = torch.arange(B, device=device).view(-1, 1).expand(B, N)
+
 			# [B,L, C] → [B, L', ps, C] → [B, C, L', ps] → [B, C*L', ps*Creq]
 			#x_blk   = X.view(B, Ltok, patch_size, C).permute(0, 3, 1, 2).contiguous()
 			#obs_blk = obs.view(B, Ltok, patch_size, C).permute(0, 3, 1, 2).contiguous()
-			#x_tok   = x_blk.view(B, C * Ltok, patch_size * Creq)
-			#obs_tok = obs_blk.view(B, C * Ltok, patch_size * Creq)
-			x_blk   = X.view(B, Ltok, patch_size, C).permute(0, 3, 1, 2).contiguous()
-			obs_blk = obs.view(B, Ltok, patch_size, C).permute(0, 3, 1, 2).contiguous()
-			x_tok   = x_blk.view(B, C * Ltok, patch_size * Creq).clone()
-			obs_tok = obs_blk.view(B, C * Ltok, patch_size * Creq).clone()
+			#x_tok   = x_blk.view(B, C * Ltok, patch_size * Creq).clone()
+			#obs_tok = obs_blk.view(B, C * Ltok, patch_size * Creq).clone()
+			#N = C * Ltok
+			#time_row   = torch.arange(Ltok, device=device).repeat(C)
+			#var_row    = torch.arange(C, device=device).repeat_interleave(Ltok)
 			
-			N = C * Ltok
-			time_row   = torch.arange(Ltok, device=device).repeat(C)
-			var_row    = torch.arange(C, device=device).repeat_interleave(Ltok)
-			time_id    = time_row.view(1, -1).expand(B, N)
-			variate_id = var_row.view(1, -1).expand(B, N).long()
-			sample_id  = torch.arange(B, device=device).view(-1, 1).expand(B, N)
+			#time_id    = time_row.view(1, -1).expand(B, N)
+			#variate_id = var_row.view(1, -1).expand(B, N).long()
+			#sample_id  = torch.arange(B, device=device).view(-1, 1).expand(B, N)
 
 		prediction_mask = torch.zeros(B, N, dtype=torch.bool, device=device)
 
@@ -1103,6 +1180,7 @@ class MultimodalConcatMLP(torch.nn.Module):
 		
 		# Patching mode (used only if we ever need to repack raw [B,L,C])
 		self.ts_patching_mode = getattr(ts_model, "patching_mode", "time_only")
+		self.ts_token_order= getattr(ts_model, "token_order", "by_variate")  # "by_variate" | "interleave_time"
 		
 		# Freeze unimodal classifier heads (not used in fusion)
 		if hasattr(self.video_model, "classifier") and isinstance(self.video_model.classifier, torch.nn.Module):
@@ -1288,19 +1366,59 @@ class MultimodalConcatMLP(torch.nn.Module):
 				C = Cpad
 
 			G = C // Creq	# number of variate-groups
-			# [B, L, C] -> [B, Ltok, ps, G, Creq] -> [B, G, Ltok, ps, Creq]
-			x_blk = X.contiguous().view(B, Ltok, patch_size, G, Creq).permute(0, 3, 1, 2, 4).contiguous()
-			obs_blk = obs.contiguous().view(B, Ltok, patch_size, G, Creq).permute(0, 3, 1, 2, 4).contiguous()
-
+			
 			N = G * Ltok
-			x_tok = x_blk.view(B, N, patch_size * Creq)
-			obs_tok = obs_blk.view(B, N, patch_size * Creq)
+			blk_x  = X.contiguous().view(B, Ltok, patch_size, G, Creq)    # [B, Ltok, ps, G, Creq]
+			blk_ob = obs.contiguous().view(B, Ltok, patch_size, G, Creq)  # [B, Ltok, ps, G, Creq]
 
-			time_grid = torch.arange(Ltok, device=device).view(1, 1, Ltok).expand(B, G, Ltok)
-			var_grid = torch.arange(G, device=device).view(1, G, 1).expand(B, G, Ltok)
-			time_id = time_grid.reshape(B, N)
-			variate_id = var_grid.reshape(B, N).long()
-			sample_id = torch.arange(B, device=device).view(-1, 1).expand(B, N)
+			if self.ts_token_order=="by_variate":
+				# by-variate (current):
+				# [B, Ltok, ps, G, Creq] -> [B, G, Ltok, ps, Creq] -> [B, G*Ltok, ps*Creq]
+				x_blk   = blk_x.permute(0, 3, 1, 2, 4).contiguous()   # [B, G, Ltok, ps, Creq]
+				obs_blk = blk_ob.permute(0, 3, 1, 2, 4).contiguous()
+
+				x_tok   = x_blk.view(B, N, patch_size * Creq)
+				obs_tok = obs_blk.view(B, N, patch_size * Creq)
+
+				# IDs aligned to token order: token index k = g*Ltok + t
+				time_grid = torch.arange(Ltok, device=device).view(1, 1, Ltok).expand(B, G, Ltok)
+				var_grid  = torch.arange(G, device=device).view(1, G, 1).expand(B, G, Ltok)
+				time_id    = time_grid.reshape(B, N)
+				variate_id = var_grid.reshape(B, N).long()
+				sample_id  = torch.arange(B, device=device).view(-1, 1).expand(B, N)
+			
+			elif self.ts_token_order=="interleave_time":
+				# time-major interleave:
+				# [B, Ltok, ps, G, Creq] -> [B, Ltok, G, ps, Creq] -> [B, Ltok*G, ps*Creq]
+				x_blk   = blk_x.permute(0, 1, 3, 2, 4).contiguous()   # [B, Ltok, G, ps, Creq]
+				obs_blk = blk_ob.permute(0, 1, 3, 2, 4).contiguous()
+
+				x_tok   = x_blk.view(B, N, patch_size * Creq)
+				obs_tok = obs_blk.view(B, N, patch_size * Creq)
+
+				# IDs aligned to token order: token index k = t*G + g
+				time_grid = torch.arange(Ltok, device=device).view(1, Ltok, 1).expand(B, Ltok, G)
+				var_grid  = torch.arange(G, device=device).view(1, 1, G).expand(B, Ltok, G)
+				time_id    = time_grid.reshape(B, N)
+				variate_id = var_grid.reshape(B, N).long()
+				sample_id  = torch.arange(B, device=device).view(-1, 1).expand(B, N)
+				
+			else:
+				raise RuntimeError(f"Invalid/unsupported ts_token_order={self.ts_token_order}!")
+						
+			# [B, L, C] -> [B, Ltok, ps, G, Creq] -> [B, G, Ltok, ps, Creq]
+			#x_blk = X.contiguous().view(B, Ltok, patch_size, G, Creq).permute(0, 3, 1, 2, 4).contiguous()
+			#obs_blk = obs.contiguous().view(B, Ltok, patch_size, G, Creq).permute(0, 3, 1, 2, 4).contiguous()
+
+			#N = G * Ltok
+			#x_tok = x_blk.view(B, N, patch_size * Creq)
+			#obs_tok = obs_blk.view(B, N, patch_size * Creq)
+
+			#time_grid = torch.arange(Ltok, device=device).view(1, 1, Ltok).expand(B, G, Ltok)
+			#var_grid = torch.arange(G, device=device).view(1, G, 1).expand(B, G, Ltok)
+			#time_id = time_grid.reshape(B, N)
+			#variate_id = var_grid.reshape(B, N).long()
+			#sample_id = torch.arange(B, device=device).view(-1, 1).expand(B, N)
 
 		pred_mask = torch.zeros(B, N, dtype=torch.bool, device=device)
 
