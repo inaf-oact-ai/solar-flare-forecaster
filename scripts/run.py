@@ -97,6 +97,8 @@ def get_args():
 	parser = argparse.ArgumentParser(description="Parse args.")
 
 	# - Input options
+	parser.add_argument('-inputfiles','--inputfiles', dest='inputfiles', required=False, type=str, default="", help='Input image list (FITS/PNG) separated by semicolons. For video or multi-channel image prediction. Takes precedence over --datalist and --inputfile') 
+	parser.add_argument('-inputfile','--inputfile', dest='inputfile', required=False, type=str, default="", help='Input image (FITS/PNG) or time-series data (CSV). For image or time series prediction. Takes precedence over --datalist')
 	parser.add_argument('-datalist','--datalist', dest='datalist', required=True, type=str, help='Input data json filelist') 
 	parser.add_argument('-datalist_cv','--datalist_cv', dest='datalist_cv', required=False, default="", type=str, help='Input data json filelist for validation') 
 	
@@ -1706,7 +1708,7 @@ def load_dataset(
 ##   LOAD TRAINING OPTS   ##
 ############################
 def load_training_opts(args):
-	""" Prepare training options """			
+	""" Prepare training options """
 			
 	# - Set output dir
 	output_dir= args.outdir
@@ -2081,7 +2083,34 @@ def run_predict(
 				print("--> predicted probs")
 				print(predicted_prob)
 			
+			
+		# - Modify filepath in output file
+		if "filepaths" in image_info:
+			if args.inputfile!="":
+				fname= image_info["filepaths"][0]
+				fname_base= os.path.basename(os.path.abspath(fname))
+				if args.save_base_path:	
+					del image_info["filepaths"]
+					image_info["filepath"]= fname_base
+				else:
+					del image_info["filepaths"]
+					image_info["filepath"]= fname
+			else:
+				if args.save_base_path:	
+					filepaths_mod= []
+					for fname in image_info["filepaths"]:
+						fname_base= os.path.basename(os.path.abspath(fname))
+						filepaths_mod.append(fname_base)
+					image_info["filepaths"]= filepaths_mod	
+			
+		# - Add inference results to collection
 		inference_results["data"].append(image_info)
+			
+	# - Remove "data" key for single-image input
+	if args.inputfile!="":
+		inference_out_data= inference_results["data"][0]
+	else:
+		inference_out_data= inference_results		
 			
 	# - Save json file
 	logger.info("Saving inference results with prediction info to file %s ..." % (args.outfile))
@@ -2201,8 +2230,21 @@ def main():
 		return 1
 
 	# - Read args
-	datalist= args.datalist
+	if args.inputfile=="" and args.inputfiles=="" and args.datalist=="":
+		logger.error("Empty inputfile/inputfiles and datalist args, you must provide at least one!")
+		return 1
+		
+	# - Set options
+	if args.inputfile!="":
+		logger.info(f"Overriding datalist with inputfile {inputfile} ...")
+		args.datalist= args.inputfile
 
+	if args.inputfiles!="":
+		logger.info(f"Overriding datalist with inputfiles {inputfiles} ...")
+		args.datalist= [item.strip() for item in args.inputfiles.split(";") if item.strip()]
+		
+	#datalist= args.datalist
+	
 	# - Run options
 	#device_choice= args.device
 	#device = torch.device(device_choice if torch.cuda.is_available() else "cpu")
