@@ -24,7 +24,8 @@ from pathlib import Path
 import shutil
 import stat
 from contextlib import suppress
-from typing import List, Dict, Any, Tuple, Union
+from typing import List, Dict, Any, Tuple, Union, Optional
+import json
 
 ## COMMAND-LINE ARG MODULES
 import getopt
@@ -41,6 +42,7 @@ from astropy.stats import sigma_clip
 from astropy.visualization import ZScaleInterval
 import skimage
 from PIL import Image
+import pandas as pd
 
 ## TORCH MODULES
 import torch
@@ -462,6 +464,55 @@ def read_datalist(filename, key="data"):
 	f= open(filename, "r")
 	datalist= json.load(f)[key]
 	return datalist
+	
+
+def timeseries_csv_to_json(
+	input_data: Union[str, Path, pd.DataFrame],
+	output_filepath: Optional[Union[str, Path]] = None,
+	indent: int = 2,
+) -> dict:
+	""" Converts a CSV file or pandas DataFrame into a column-oriented JSON file.
+
+	Parameters
+	----------
+	input_data : str, Path, or pd.DataFrame
+		Path to the CSV file or an existing pandas DataFrame.
+	output_filepath : str or Path, optional
+		Path where the output JSON file will be saved.
+	indent : int, default=2
+		JSON formatting indentation level.
+
+	Returns
+	-------
+	dict
+		The converted dictionary formatted as {"colname": [values...]}.
+	"""
+	# - Load data if path is provided
+	if isinstance(input_data, (str, Path)):
+		df = pd.read_csv(input_data)
+	elif isinstance(input_data, pd.DataFrame):
+		df = input_data.copy()
+	else:
+		raise TypeError("input_data must be a valid file path string, Path object, or pandas DataFrame.")
+
+	# - Convert NaNs/NaTs to None so json.dump renders valid `null` values
+	df_clean = df.astype(object).where(pd.notnull(df), None)
+
+	# - Convert DataFrame into {column_name: [list of values]}
+	ts_dict = df_clean.to_dict(orient="list")
+
+	# - Serialize any pandas Timestamps to ISO 8601 strings
+	for col, values in ts_dict.items():
+		ts_dict[col] = [
+			v.isoformat() if isinstance(v, pd.Timestamp) else v for v in values
+		]
+
+	# - Export to JSON file
+	if output_filepath is not None:
+		with open(output_filepath, "w", encoding="utf-8") as f:
+			json.dump(ts_dict, f, indent=indent)
+
+	return ts_dict
 	
 ##########################
 ##    READ IMAGE

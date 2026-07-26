@@ -13,3 +13,4 @@ matplotlib
 wandb
 tensorboard
 pynvml
+pandas

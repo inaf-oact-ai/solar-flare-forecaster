@@ -87,10 +87,130 @@ class BaseDataset(Dataset):
 		transform=None,
 		verbose=False
 	):
-		self.filename= filename
-		self.datalist= read_datalist(filename)
+		# - Set datalist
+		self._set_datalist(filename)
+		
+		# - Set transform
 		self.transform = transform
+		
+		# - Set other options
 		self.verbose= verbose
+
+
+	def _set_datalist(self, filename):
+		""" Set data list from received filename arg """
+		
+		# - Set filename
+		self.filename= filename
+		
+		# - Check if filename was set
+		if filename is None:
+			err= f"Input filename not set!"
+			logger.error(err)
+			raise RuntimeError(err)
+			
+		# - Check format/type of input data
+		if isinstance(filename, str): # string
+			# - Check not empty string
+			if filename=="":
+				err= f"Input filename is an empty string!"
+				logger.error(err)
+				raise RuntimeError(err)
+		
+			# - Set datalist
+			filename_fullpath= os.path.abspath(filename)
+			filename_base= os.path.basename(filename_fullpath)
+			filename_base_noext= os.path.splitext(filename_base)[0]
+			filename_ext= os.path.splitext(filename_base)[1]
+			
+			if filename_ext==".json": # - Create datalist from json file (DEFAULT)
+				self.datalist= read_datalist(filename)
+				
+			elif filename_ext in {".fits", ".png", ".jpg", ".jpeg"}: # - Create datalist from single-item image entry (for predict)
+				self.datalist= self._set_datalist_from_image(filename)
+				
+			elif filename_ext in {".csv"}: # - Create datalist from single-item time-series CSV entry (for predict)
+				self.datalist= self._set_datalist_from_ts_csv(filename)
+				
+			else:
+				err= f"Unknown/unsupported input file extension ({filename_ext})!"
+				logger.error(err)
+				raise RuntimeError(err)
+
+		elif isinstance(filename, list): # list
+			# - Check not empty list
+			if not filename:
+				err= f"Input filename is an empty list!"
+				logger.error(err)
+				raise RuntimeError(err)
+		
+			# - Check if list of strings
+			if all(isinstance(s, str) for s in filename): # list of strings
+				filename_fullpath= os.path.abspath(filename[0])
+				filename_base= os.path.basename(filename_fullpath)
+				filename_base_noext= os.path.splitext(filename_base)[0]
+				filename_ext= os.path.splitext(filename_base)[1]
+			
+				if filename_ext in {".fits", ".png", ".jpg", ".jpeg"}: # - Create datalist from single-item image list entry (for predict). This fits single video and single multi-channel image case
+					self.datalist= self._set_datalist_from_image_list(filenames=filename)
+				
+				else:
+					err= f"Unknown/unsupported input file extension ({filename_ext})!"
+					logger.error(err)
+					raise RuntimeError(err)
+			
+			else:
+				err= f"Input filename is a list but given empty list!"
+				logger.error(err)
+				raise RuntimeError(err)
+				
+		else:
+			err= f"Input filename is not string or list!"
+			logger.error(err)
+			raise RuntimeError(err)
+
+
+	def _set_datalist_from_image(self, filename):
+		""" Set data list from input image """
+		
+		filename_fullpath= os.path.abspath(filename)
+		filename_base= os.path.basename(filename_fullpath)
+		filename_base_noext= os.path.splitext(filename_base)[0]
+		
+		datalist= [
+			{
+				"filepaths": [filename],
+				"sname": filename_base_noext
+			}
+		]
+		return datalist
+		
+	def _set_datalist_from_image_list(self, filenames):
+		""" Set data list from input image list """
+		
+		filename_fullpath= os.path.abspath(filenames[0])
+		filename_base= os.path.basename(filename_fullpath)
+		filename_base_noext= os.path.splitext(filename_base)[0]
+		
+		datalist= [
+			{
+				"filepaths": filenames,
+				"sname": filename_base_noext
+			}
+		]
+		return datalist
+
+	def _set_datalist_from_ts_csv(self, filename):
+		""" Set data list from input CSV time series file """
+
+		# - Read CSV/pandas and convert to dict
+		data_dict= timeseries_csv_to_json(input_data=filename)
+		
+		datalist= [
+			data_dict
+		]
+		return datalist
+		
 
 	def load_flareid(self, idx):
 		""" Load single-class/single-out target """
