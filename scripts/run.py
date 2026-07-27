@@ -97,8 +97,7 @@ def get_args():
 	parser = argparse.ArgumentParser(description="Parse args.")
 
 	# - Input options
-	parser.add_argument('-inputfiles','--inputfiles', dest='inputfiles', required=False, type=str, default="", help='Input image list (FITS/PNG) separated by semicolons. For video or multi-channel image prediction. Takes precedence over --datalist and --inputfile') 
-	parser.add_argument('-inputfile','--inputfile', dest='inputfile', required=False, type=str, default="", help='Input image (FITS/PNG) or time-series data (CSV). For image or time series prediction. Takes precedence over --datalist')
+	parser.add_argument('-inputfile','--inputfile', dest='inputfile', required=False, type=str, default="", help='Input image (FITS/PNG) or time-series data (CSV). For image or time series prediction. Takes precedence over --datalist. Multiple files can be passed, separated by semicolons.')
 	parser.add_argument('-datalist','--datalist', dest='datalist', required=True, type=str, help='Input data json filelist') 
 	parser.add_argument('-datalist_cv','--datalist_cv', dest='datalist_cv', required=False, default="", type=str, help='Input data json filelist for validation') 
 	
@@ -1906,6 +1905,10 @@ def run_predict(
 	inference_results= {"data": []}
 	nsamples= dataset.get_sample_size()
 	
+	inputfiles= [item.strip() for item in args.inputfile.split(";") if item.strip()]
+	nfiles= len(inputfiles)
+	inputfile= inputfiles[0]
+	
 	for i in range(nsamples):
 		if i%1000==0:
 			logger.info("#%d/%d images processed ..." % (i+1, nsamples))
@@ -2086,7 +2089,7 @@ def run_predict(
 			
 		# - Modify filepath in output file
 		if "filepaths" in image_info:
-			if args.inputfile!="":
+			if nfiles==1 and inputfile!="":
 				fname= image_info["filepaths"][0]
 				fname_base= os.path.basename(os.path.abspath(fname))
 				if args.save_base_path:	
@@ -2107,7 +2110,7 @@ def run_predict(
 		inference_results["data"].append(image_info)
 			
 	# - Remove "data" key for single-image input
-	if args.inputfile!="":
+	if nfiles==1 and inputfile!="":
 		inference_out_data= inference_results["data"][0]
 	else:
 		inference_out_data= inference_results		
@@ -2230,18 +2233,21 @@ def main():
 		return 1
 
 	# - Read args
-	if args.inputfile=="" and args.inputfiles=="" and args.datalist=="":
-		logger.error("Empty inputfile/inputfiles and datalist args, you must provide at least one!")
+	if args.inputfile=="" and args.datalist=="":
+		logger.error("Empty inputfile and datalist args, you must provide at least one!")
 		return 1
 		
 	# - Set options
 	if args.inputfile!="":
-		logger.info(f"Overriding datalist with inputfile {inputfile} ...")
-		args.datalist= args.inputfile
-
-	if args.inputfiles!="":
-		logger.info(f"Overriding datalist with inputfiles {inputfiles} ...")
-		args.datalist= [item.strip() for item in args.inputfiles.split(";") if item.strip()]
+		# - Parse input file (can be single string of semicolon separated strings
+		inputfiles= [item.strip() for item in args.inputfile.split(";") if item.strip()]
+		if len(inputfiles)==1:
+			inputfile= inputfiles[0]
+			logger.info(f"Overriding datalist with inputfile {inputfile} ...")
+			args.datalist= inputfile
+		else:
+			logger.info(f"Overriding datalist with inputfiles {str(inputfiles)} ...")
+			args.datalist= inputfiles
 		
 	#datalist= args.datalist
 	
