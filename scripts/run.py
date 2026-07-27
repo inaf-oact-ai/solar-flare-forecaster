@@ -281,6 +281,9 @@ def get_args():
 	parser.add_argument('-outfile','--outfile', dest='outfile', required=False, default="classifier_results.json", type=str, help='Output file with saved inference results') 
 	parser.add_argument("--save_metric_curves", action="store_true", help="If set, save precision/recall/F1/TSS/HSS/MCC/ApSS vs threshold to CSV for eval and test.")
 	
+	parser.add_argument('--save_base_path', dest='save_base_path', action='store_true', help='Save input base filename in output json catalog rather than full path (default=save full path)')	
+	parser.set_defaults(save_base_path=False)
+	
 	# - Parse arguments
 	#   NB: Accept unknown args so launchers can't break
 	#args = parser.parse_args()	
